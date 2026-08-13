@@ -5,6 +5,7 @@ import re
 import select
 import shutil
 import sys
+import textwrap
 from dataclasses import dataclass
 from typing import IO, Optional, Sequence
 
@@ -91,6 +92,28 @@ def read_key(stream: IO[str] = sys.stdin) -> str:
     return _read_windows_key(stream) if os.name == "nt" else _read_posix_key(stream)
 
 
+def _wrapped_lines(
+    text: object,
+    width: int,
+    initial_indent: str = "",
+    subsequent_indent: str = "",
+) -> Sequence[str]:
+    """Wrap visible terminal text so no rendered line exceeds width."""
+    width = max(1, int(width))
+    value = str(text)
+    lines = textwrap.wrap(
+        value,
+        width=width,
+        initial_indent=initial_indent,
+        subsequent_indent=subsequent_indent,
+        break_long_words=True,
+        break_on_hyphens=False,
+        replace_whitespace=True,
+        drop_whitespace=True,
+    )
+    return tuple(lines) if lines else (initial_indent.rstrip(),)
+
+
 def _render_menu(
     title: str,
     items: Sequence[MenuItem],
@@ -102,25 +125,52 @@ def _render_menu(
     clear_screen(stream)
     size = shutil.get_terminal_size((60, 24))
     width = max(24, min(88, size.columns))
-    stream.write(palette.brand(title) + "\n")
-    stream.write(palette.muted("─" * min(width, 62)) + "\n")
-    # A phone keyboard can cut the usable terminal height in half. Descriptions
-    # disappear automatically before they can push numbered actions off-screen.
+
+    for line in _wrapped_lines(title, width):
+        stream.write(palette.brand(line) + "\n")
+
+    stream.write(palette.muted("─" * width) + "\n")
+
+    # A phone keyboard can cut the usable terminal height in half.
+    # Descriptions disappear before they can push actions off-screen.
     roomy = width >= 52 and size.lines >= len(items) * 2 + 6
+
     for index, item in enumerate(items):
         pointer = "▶" if index == selected else " "
         key = f"{item.key}."
-        line = f"{pointer} {key:<3} {item.label}"
+        prefix = f"{pointer} {key:<3} "
+        continuation = " " * len(prefix)
+
+        lines = _wrapped_lines(
+            item.label,
+            width,
+            initial_indent=prefix,
+            subsequent_indent=continuation,
+        )
+
         if index == selected:
-            line = palette.paint(line, "selected")
+            painter = lambda value: palette.paint(value, "selected")
         elif item.key == "0":
-            line = palette.muted(line)
+            painter = palette.muted
         else:
-            line = palette.accent(line)
-        stream.write(line + "\n")
+            painter = palette.accent
+
+        for line in lines:
+            stream.write(painter(line) + "\n")
+
         if roomy and item.description:
-            stream.write("      " + palette.muted(item.description) + "\n")
-    stream.write("\n" + palette.muted(footer) + "\n")
+            description_prefix = "      "
+            for line in _wrapped_lines(
+                item.description,
+                width,
+                initial_indent=description_prefix,
+                subsequent_indent=description_prefix,
+            ):
+                stream.write(palette.muted(line) + "\n")
+
+    stream.write("\n")
+    for line in _wrapped_lines(footer, width):
+        stream.write(palette.muted(line) + "\n")
     stream.flush()
 
 
