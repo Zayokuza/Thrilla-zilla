@@ -1,7 +1,7 @@
 # Current status
 
-Version: **0.1.0-alpha.2**  
-Date: **2026-08-13**  
+Version: **0.1.0-alpha.2**
+Date: **2026-08-13**
 Stage: **Stages 1–2 complete; Stage 3 in progress**
 
 ## What is verified in the source workspace
