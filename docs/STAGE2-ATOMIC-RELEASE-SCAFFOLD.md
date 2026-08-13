@@ -1,76 +1,124 @@
-# Stage 2 — Atomic Release Scaffold
+# Stage 2 — Atomic Installation, Update and Rollback
 
-Status: **ROUGH / intentionally below 50% complete**
+Status: **COMPLETE — 100%**
 
-Stage 2 establishes only the inactive foundation needed for safe future
-installation, update and rollback work.
+Stage 2 provides Thrilla with a tested atomic release system for local
+installation, updates, activation and rollback.
 
-It MUST NOT interfere with normal Thrilla startup.
-
-## Implemented
+## Completed capabilities
 
 - deterministic dated release IDs;
 - isolated release directories;
-- inactive payload staging;
 - source-tree copying;
 - exclusion of `.git`, caches, bytecode and virtual environments;
-- atomic candidate manifest writing;
-- refusal to overwrite an existing candidate;
-- cleanup of a partially-created candidate;
-- manual-only invocation;
-- tests proving staging does not touch a live launcher.
+- atomic release manifests;
+- refusal to overwrite an existing release;
+- cleanup of incomplete candidates;
+- pre-activation Python compilation;
+- pre-activation automated test execution;
+- validated-release state;
+- atomic `current` release pointer;
+- atomic `previous` release pointer;
+- startup proof before accepting activation;
+- automatic restoration after failed activation;
+- restoration of both current and previous pointers after failure;
+- previous-release manifest tracking;
+- explicit rollback;
+- exclusive update locking;
+- stale-lock detection and recovery;
+- protection against concurrent release mutation;
+- release inventory/status;
+- retention/pruning while protecting active and previous releases;
+- stable POSIX launcher;
+- stable Windows launcher generation;
+- launcher symlink replacement without overwriting the symlink target;
+- launcher isolation from the development checkout;
+- shared release/application state root;
+- release CLI:
+  - `release status`
+  - `release install`
+  - `release rollback`
+  - `release prune`
+- Termux atomic installer;
+- Windows atomic installer implementation;
+- preservation of the previous launcher during migration;
+- real Android/Termux atomic installation proof;
+- real Android/Termux second-release update proof;
+- real Android/Termux rollback proof.
 
-## Deliberately not implemented
+## Verified Android / Termux proof
 
-The following are deferred:
+Two real releases were installed:
 
-- launcher activation;
-- automatic update checking;
-- automatic startup integration;
-- active-release pointer;
-- previous-release pointer;
-- rollback execution;
-- failed-activation recovery;
-- pre-activation testing;
-- live model/runtime validation;
-- release locks;
-- concurrent updater handling;
-- remote downloads;
-- package/signature verification;
-- release channels;
-- pruning/retention;
-- Windows activation;
-- Termux launcher replacement.
+- `20260813-221521-e62c3521cd61`
+- `20260813-221703-e62c3521cd61`
 
-## Non-blocking invariant
+Before rollback:
 
-Normal Thrilla does not import or execute `thrilla.release_stage`.
+    current  = 20260813-221703-e62c3521cd61
+    previous = 20260813-221521-e62c3521cd61
 
-Failure inside the release-staging module therefore cannot prevent the
-existing Thrilla application from starting.
+After rollback:
 
-A candidate remains:
+    current  = 20260813-221521-e62c3521cd61
+    previous = 20260813-221703-e62c3521cd61
 
-    staged-inactive
+The phone printed:
 
-until later Stage-2 work explicitly implements and tests activation.
+    PASS: REAL PHONE ATOMIC ROLLBACK
 
-## Future Stage-2 sequence
+The rolled-back installation then passed:
 
-1. candidate validation;
-2. candidate test runner;
-3. release metadata validation;
-4. activation pointer abstraction;
-5. atomic pointer swap;
-6. launcher indirection;
-7. previous-release preservation;
-8. health proof after activation;
-9. automatic recovery;
-10. explicit rollback;
-11. Termux installation integration;
-12. Windows installation integration;
-13. concurrency locking;
-14. release retention;
-15. update transport.
+    thrilla --version
+    thrilla doctor --no-model
 
-Nothing in this scaffold performs those operations yet.
+## Automated verification
+
+The complete regression suite passed on Android/Termux:
+
+    Ran 62 tests
+    OK
+
+The suite covers release staging, validation, activation, pointer management,
+rollback, automatic failed-activation recovery, locking, stale-lock recovery,
+retention, POSIX launcher isolation, Windows launcher generation, installer
+integration and failure paths.
+
+`git diff --check` also passed.
+
+## Safety properties
+
+A candidate cannot become active until its compilation and tests pass.
+
+A failed candidate does not replace the working release.
+
+A failed post-activation startup proof restores the prior release state.
+
+Rollback proves the target release can start before switching to it.
+
+Concurrent release mutations are rejected.
+
+A stale update lock may be recovered only when its recorded owner is no
+longer running.
+
+The stable launcher follows the active release pointer instead of importing
+the development checkout.
+
+Existing launcher symlinks are replaced without overwriting their targets.
+
+## Platform status
+
+Android / Termux installation, update and rollback are verified on the real
+target phone.
+
+The Windows installer and stable launcher are implemented and covered by
+automated generation/behavior tests. Full execution on the target Windows
+machine remains part of later cross-platform target-device verification and
+does not block completion of the Stage-2 atomic release architecture.
+
+## Completion decision
+
+Stage 2 is complete.
+
+Further changes to installation/update behavior are maintenance or future
+features, not unfinished Stage-2 foundation work.

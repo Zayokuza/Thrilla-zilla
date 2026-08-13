@@ -1,10 +1,23 @@
 # Current status
 
 Version: **0.1.0-alpha.2**  
-Date: **2026-08-12**  
-Stage: **native control-plane alpha**
+Date: **2026-08-13**  
+Stage: **Stages 1–2 complete; Stage 3 in progress**
 
 ## What is verified in the source workspace
+
+- Stage 1 phone-interface stabilization is complete;
+- Stage 2 atomic installation/update/rollback is complete;
+- the complete Android/Termux regression suite passes 62 tests;
+- atomic candidate staging, validation and activation are tested;
+- current/previous release pointers are tested;
+- failed activation automatically restores prior release state;
+- explicit rollback is tested;
+- stale/concurrent release locks are tested;
+- release retention is tested;
+- POSIX stable-launcher isolation is tested;
+- Windows stable-launcher generation is tested;
+- Termux and Windows installers use the atomic release manager;
 
 - the project imports and compiles;
 - every Python source and test file parses with Python 3.9 grammar;
@@ -41,7 +54,7 @@ The Ctrl+C failure path is covered by new alpha.2 regression tests. It still req
 - automatic model startup, because it is not implemented yet;
 - RAM, CPU, temperature, latency, storage, and battery measurements;
 - Windows behavior on the target Windows machine;
-- autonomous tools, coding, research, memory retrieval, sandboxing, and rollback, because those layers are not implemented yet.
+- autonomous tools, coding, research, memory retrieval and sandboxing, because those later layers are not implemented yet.
 
 ## Capability status
 
@@ -55,6 +68,7 @@ The Ctrl+C failure path is covered by new alpha.2 regression tests. It still req
 | Read-only Git donor inspection | Implemented | Requires selected-repo phone testing |
 | Local history and audit metadata | Implemented | Unit tested |
 | Local-model HTTP client | Implemented | Protocol tested; live phone proof pending |
+| Atomic install/update/rollback | Working | 62-test suite plus real Android/Termux install, update and rollback proof |
 | Model discovery/lifecycle | Missing | Roadmap stage 3 |
 | Agent Brain | Missing | Roadmap stage 4 |
 | Safe tools and executor | Missing | Roadmap stages 5–8 |
