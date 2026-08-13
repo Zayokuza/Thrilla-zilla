@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "project": "Thrilla-zilla",
+  "repository": "Zayokuza/Thrilla-zilla",
+  "version": "0.1.0-alpha.2",
+  "date": "2026-08-12",
+  "stage": "native control-plane alpha",
+  "release_targets": [
+    "Android/Termux",
+    "Windows"
+  ],
+  "project_goal": "Build one local-first AI workbench that can talk, research, understand unfamiliar repositories, write and repair software, use tools, work with files and data, operate on Android and Windows, and improve through measured keep-or-rollback engineering.",
+  "core_routes": [
+    "general-chat",
+    "coding",
+    "deep-search",
+    "files",
+    "data",
+    "device",
+    "system"
+  ],
+  "behavioral_priorities": [
+    "accuracy",
+    "user safety",
+    "reliability",
+    "privacy",
+    "transparency",
+    "accountability",
+    "fairness",
+    "adaptability",
+    "efficiency",
+    "user-centered empathy"
+  ],
+  "phase_1": {
+    "purpose": "Core donor/reference library for building Thrilla itself",
+    "categories": 10,
+    "repositories": 100,
+    "priority_repositories": 30,
+    "phone_reported": {
+      "repositories_present": 100,
+      "clone_failures": 0,
+      "approximate_size_gb": 23,
+      "free_space_at_completion_gb": 61
+    }
+  },
+  "phase_2": {
+    "purpose": "Specialist engineering reference library",
+    "conceptual_categories": 10,
+    "conceptual_repositories": 100,
+    "canonical_repositories_today": 1,
+    "must_avoid_phase_1_duplicates": true,
+    "verified_collected": [
+      {
+        "repository": "XTLS/Xray-core",
+        "category": "networking-proxy-transport",
+        "path": "11-networking-proxy/01-xray-core",
+        "phone_reported_branch": "main",
+        "phone_reported_commit": "7d214f8",
+        "phone_reported_clean": true,
+        "phone_reported_size_mb": 8.7
+      }
+    ]
+  },
+  "current_capabilities": [
+    "colored compact terminal interface",
+    "arrow-key and numeric menu navigation",
+    "clean Ctrl+C back and exit behavior",
+    "deterministic transparent request routing",
+    "OpenAI-compatible local-model HTTP client",
+    "remote-model default deny",
+    "canonical core-100 and priority-30 catalog",
+    "read-only donor scan and Git inspection",
+    "local conversation history",
+    "metadata-only activity log",
+    "settings and diagnostics",
+    "Termux and Windows launchers",
+    "Python 3.9-compatible dependency-free runtime"
+  ],
+  "missing_core_capabilities": [
+    "automatic local-model discovery and lifecycle",
+    "bounded agent brain",
+    "structured tool registry",
+    "permission and safety policy",
+    "safe file, shell, Git, process, compile, lint, and test tools",
+    "checkpoints and automatic rollback",
+    "repository and language intelligence",
+    "coding and repair agent",
+    "SQLite retrieval memory",
+    "live, cached, and archived research with citations",
+    "isolated execution and resource limits",
+    "evaluation, security, benchmarks, and full auditing",
+    "controlled self-improvement",
+    "Android and Windows device adapters",
+    "atomic upgrades and recovery",
+    "complete Phase-2 specialist catalog"
+  ],
+  "ordered_roadmap": [
+    "stabilize phone interface",
+    "add atomic installation and updates",
+    "build local-model runtime manager",
+    "create bounded Agent Brain",
+    "define structured tool contract",
+    "add safety and permission controls",
+    "implement essential tools",
+    "add checkpoints and rollback",
+    "build repository intelligence",
+    "build coding and repair agent",
+    "add SQLite memory and retrieval",
+    "add research and OSINT",
+    "add workflows and integrations",
+    "add evaluation, security, and full auditing",
+    "add controlled self-improvement",
+    "add Android and Windows adapters",
+    "finish interface and API surfaces",
+    "study donors under provenance control",
+    "complete target-device proof",
+    "build Phase 2"
+  ],
+  "verification": {
+    "workspace": {
+      "unit_and_regression_tests": 29,
+      "tests_passed": true,
+      "python_3_9_grammar": "PASS",
+      "compileall": "PASS",
+      "bash_syntax": "PASS",
+      "real_pseudoterminal": "PASS",
+      "ctrl_c_main_menu": "PASS",
+      "ctrl_c_submenu": "PASS",
+      "local_markdown_links": "PASS"
+    },
+    "phone": {
+      "alpha_1_launch": "PASS",
+      "phase_1_donor_scan": "100/100",
+      "priority_screen": "observed",
+      "alpha_1_ctrl_c": "FAIL with traceback",
+      "alpha_2_ctrl_c": "requires device confirmation",
+      "live_llama_server": "requires device confirmation",
+      "resource_measurements": "requires device confirmation"
+    }
+  },
+  "donor_policy": {
+    "merge_all_repositories": false,
+    "execute_donors_automatically": false,
+    "license_check_before_direct_reuse": true,
+    "provenance_record_required": true,
+    "isolated_test_required": true,
+    "benchmark_and_critic_required": true,
+    "regressions_roll_back": true
+  },
+  "license": {
+    "thrilla_zilla": "not selected",
+    "donors": "each donor retains its own license"
+  }
+}

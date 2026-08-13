@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thrilla-zilla"
+version = "0.1.0a2"
+description = "Phone-first, local-first AI workbench for Android/Termux and Windows"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+thrilla = "thrilla.cli:main"
+
+[tool.setuptools]
+packages = ["thrilla"]
