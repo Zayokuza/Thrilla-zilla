@@ -1,7 +1,7 @@
 import io
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from thrilla.app import DONOR_MENU, MAIN_MENU, SETTINGS_MENU, ThrillaApp
 from thrilla.colors import ColorMode, Palette, strip_ansi
@@ -60,3 +60,35 @@ class StageOneInterfaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatNavigationAliasTests(unittest.TestCase):
+    def test_plain_navigation_aliases_leave_chat_without_model_call(self):
+        commands = (
+            "back",
+            "exit",
+            "quit",
+            "0",
+            "go back",
+            "start over",
+            "main menu",
+            "menu",
+            "home",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                app = ThrillaApp.__new__(ThrillaApp)
+                app.palette = Palette(ColorMode.NEVER)
+                app.model = Mock()
+
+                with patch.object(app, "_header"), patch.object(
+                    app,
+                    "_input_line",
+                    return_value=command,
+                ):
+                    app.ask()
+
+                app.model.chat.assert_not_called()
+
+

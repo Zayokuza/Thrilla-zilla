@@ -201,8 +201,22 @@ class ThrillaApp:
                 return
             if not prompt:
                 continue
-            command = prompt.lower()
-            if command in {"/back", "/exit", "/quit"}:
+            command = prompt.lower().strip()
+
+            if command in {
+                "/back",
+                "/exit",
+                "/quit",
+                "back",
+                "exit",
+                "quit",
+                "0",
+                "go back",
+                "start over",
+                "main menu",
+                "menu",
+                "home",
+            }:
                 return
             if command == "/help":
                 print(self.palette.accent("/route  /model  /clear  /back"))
