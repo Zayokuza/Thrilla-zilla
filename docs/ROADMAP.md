@@ -2,15 +2,15 @@
 
 This order follows technical dependencies. Later layers rely on the contracts and safety behavior established earlier.
 
-## 1. Stabilize the phone interface
+## 1. Stabilize the phone interface — COMPLETE
 
 Fix Ctrl+C, terminal restoration, resizing, rapid number-plus-Enter input, keyboard-height layout, wrapping, and every menu route. The rest of the system is inaccessible if the control surface is unreliable.
 
-## 2. Add atomic installation and updates
+## 2. Add atomic installation and updates — COMPLETE
 
 Install into dated release directories, run tests before activation, switch one launcher only after success, preserve the prior release, and support rollback. This protects the working phone installation while Thrilla is changing quickly.
 
-## 3. Build the local-model runtime manager
+## 3. Build the local-model runtime manager — IN PROGRESS
 
 Discover configured GGUF files, start and stop `llama-server`, check readiness, stream tokens, cancel generation, recover crashes, and enforce configurable context/RAM limits. The current client cannot start its own model.
 

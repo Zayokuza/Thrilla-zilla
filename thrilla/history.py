@@ -42,8 +42,9 @@ class ConversationHistory:
                 output.append(record)
         return output
 
-    def messages(self, turns: int = 12) -> List[Dict[str, str]]:
-        records = self.records(limit=max(0, turns) * 2)
+    def messages(self, turns: Optional[int] = 12) -> List[Dict[str, str]]:
+        limit = None if turns is None else max(0, turns) * 2
+        records = self.records(limit=limit)
         return [
             {"role": record["role"], "content": record["content"]}
             for record in records

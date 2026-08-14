@@ -10,52 +10,61 @@ if ! command -v "$python_bin" >/dev/null 2>&1; then
     exit 1
 fi
 
-"$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' || {
+"$python_bin" -c \
+    'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' || {
     echo "Thrilla requires Python 3.9 or newer." >&2
     exit 1
 }
 
-echo "Checking Thrilla before installation..."
-PYTHONPATH="$project_root${PYTHONPATH:+:$PYTHONPATH}" \
-    "$python_bin" -m compileall -q "$project_root/thrilla"
-PYTHONPATH="$project_root${PYTHONPATH:+:$PYTHONPATH}" \
-    "$python_bin" -m unittest discover -s "$project_root/tests" -q
-
 if [ -n "${THRILLA_INSTALL_DIR:-}" ]; then
     install_dir="$THRILLA_INSTALL_DIR"
-    mkdir -p "$install_dir"
 elif [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
     install_dir="$PREFIX/bin"
 else
     install_dir="$HOME/.local/bin"
-    mkdir -p "$install_dir"
 fi
 
+mkdir -p "$install_dir"
+
+state_root="${THRILLA_STATE_ROOT:-${THRILLA_HOME:-$HOME/.thrilla-zilla}}"
 launcher="$install_dir/thrilla"
-source_launcher="$project_root/bin/thrilla"
-if [ -e "$launcher" ] || [ -L "$launcher" ]; then
-    existing="$(readlink -f "$launcher" 2>/dev/null || true)"
-    expected="$(readlink -f "$source_launcher" 2>/dev/null || true)"
-    if [ "$existing" != "$expected" ]; then
-        backup="$launcher.previous.$(date +%Y%m%d-%H%M%S)"
-        mv "$launcher" "$backup"
-        echo "Preserved the previous launcher at $backup"
-    fi
+
+commit="$(
+    git -C "$project_root" rev-parse --short=12 HEAD 2>/dev/null ||
+    printf 'local-source'
+)"
+
+if [ -n "$(git -C "$project_root" status --porcelain 2>/dev/null || true)" ]; then
+    commit="${commit}-dirty"
 fi
 
-chmod +x "$source_launcher"
-ln -sfn "$source_launcher" "$launcher"
-state_root="${THRILLA_STATE_ROOT:-$HOME/.thrilla-zilla}"
-mkdir -p "$state_root"
+timestamp="$(date -u +%Y%m%d-%H%M%S)"
+
+if [ -e "$launcher" ] || [ -L "$launcher" ]; then
+    backup="$launcher.pre-atomic-$timestamp"
+    cp -a "$launcher" "$backup"
+    echo "Preserved existing launcher: $backup"
+fi
+
+echo "Installing verified atomic Thrilla release..."
+
+PYTHONPATH="$project_root${PYTHONPATH:+:$PYTHONPATH}" \
+"$python_bin" -m thrilla release install \
+    --project-root "$project_root" \
+    --state-root "$state_root" \
+    --commit "$commit" \
+    --timestamp "$timestamp" \
+    --launcher "$launcher" \
+    --launcher-platform posix
 
 echo
-echo "THRILLA-ZILLA INSTALLED"
-echo "Project: $project_root"
-echo "Command: $launcher"
+echo "THRILLA-ZILLA ATOMIC INSTALL COMPLETE"
+echo "State:    $state_root"
+echo "Launcher: $launcher"
 echo
-echo "Start it with:"
-echo "  thrilla"
+echo "Verify:"
+echo "  thrilla --version"
+echo "  thrilla release status --json"
 echo
-echo "Quick checks:"
-echo "  thrilla doctor"
-echo "  thrilla donors --problems"
+echo "Rollback:"
+echo "  thrilla release rollback"

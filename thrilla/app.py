@@ -68,10 +68,18 @@ class ThrillaApp:
         self.message = ""
 
     def _model_client(self) -> LocalModelClient:
+        timeout = self.config.resolve_limit(
+            "model.request_timeout"
+        ).value
+        remote_policy = self.config.resolve_limit(
+            "network.remote_model"
+        ).value
+
         return LocalModelClient(
             self.config.model_url,
             self.config.model_name,
-            self.config.request_timeout,
+            timeout,
+            remote_policy=remote_policy,
         )
 
     def _refresh(self) -> None:
@@ -126,9 +134,9 @@ class ThrillaApp:
         }.get(level, self.palette.accent)
         print(f"{painter(marker)} {label}: {value}")
 
-    def run(self) -> int:
-        self.audit.write("app_started", version=__version__, platform=platform_name())
-        handlers: Dict[str, Callable[[], None]] = {
+    def main_handlers(self) -> Dict[str, Callable[[], None]]:
+        """Return the complete handler map for MAIN_MENU."""
+        return {
             "1": self.ask,
             "2": self.donor_library,
             "3": self.route_inspector,
@@ -139,6 +147,32 @@ class ThrillaApp:
             "8": self.settings,
             "9": self.about,
         }
+
+    def donor_handlers(self) -> Dict[str, Callable[[], None]]:
+        """Return the complete handler map for DONOR_MENU."""
+        return {
+            "1": self.donor_overview,
+            "2": self.donor_categories,
+            "3": self.priority_donors,
+            "4": self.donor_problems,
+            "5": self.inspect_donor,
+            "6": self.specialist_donors,
+        }
+
+    def settings_handlers(self) -> Dict[str, Callable[[], None]]:
+        """Return the complete handler map for SETTINGS_MENU."""
+        return {
+            "1": self.setting_color,
+            "2": self.setting_donor_root,
+            "3": self.setting_model_url,
+            "4": self.setting_model_name,
+            "5": self.setting_history,
+            "6": self.setting_timeout,
+        }
+
+    def run(self) -> int:
+        self.audit.write("app_started", version=__version__, platform=platform_name())
+        handlers = self.main_handlers()
         try:
             while True:
                 footer = self.message or "↑/↓ move  •  Enter select  •  numbers work too"
@@ -175,8 +209,22 @@ class ThrillaApp:
                 return
             if not prompt:
                 continue
-            command = prompt.lower()
-            if command in {"/back", "/exit", "/quit"}:
+            command = prompt.lower().strip()
+
+            if command in {
+                "/back",
+                "/exit",
+                "/quit",
+                "back",
+                "exit",
+                "quit",
+                "0",
+                "go back",
+                "start over",
+                "main menu",
+                "menu",
+                "home",
+            }:
                 return
             if command == "/help":
                 print(self.palette.accent("/route  /model  /clear  /back"))
@@ -199,7 +247,14 @@ class ThrillaApp:
             print(self.palette.muted(
                 f"route: {decision.route.value}  •  confidence: {decision.confidence:.0%}  •  {decision.explanation}"
             ))
-            previous = self.history.messages(self.config.history_turns) if self.config.save_history else []
+            history_turns = self.config.resolve_limit(
+                "memory.history_turns"
+            ).value
+            previous = (
+                self.history.messages(history_turns)
+                if self.config.save_history
+                else []
+            )
             messages = [*previous, {"role": "user", "content": prompt}]
             if self.config.save_history:
                 self.history.append("user", prompt, decision.route.value)
@@ -229,14 +284,7 @@ class ThrillaApp:
             print("\n" + self.palette.answer("thrilla> ") + self.palette.answer(answer))
 
     def donor_library(self) -> None:
-        handlers: Dict[str, Callable[[], None]] = {
-            "1": self.donor_overview,
-            "2": self.donor_categories,
-            "3": self.priority_donors,
-            "4": self.donor_problems,
-            "5": self.inspect_donor,
-            "6": self.specialist_donors,
-        }
+        handlers = self.donor_handlers()
         while True:
             choice = select_menu("DONOR LIBRARY", DONOR_MENU, self.palette)
             if choice == "0":
@@ -314,7 +362,13 @@ class ThrillaApp:
             return
         spec = specs[0]
         state = self.registry.inspect(spec)
-        details = self.registry.verify_git(spec)
+        git_timeout = self.config.resolve_limit(
+            "donor.git_timeout"
+        ).value
+        details = self.registry.verify_git(
+            spec,
+            timeout=git_timeout,
+        )
         self._status("Repository", spec.repository)
         self._status("Path", str(state.path), "pass" if state.present else "fail")
         self._status("State", state.state, "pass" if state.present else "fail")
@@ -423,14 +477,7 @@ class ThrillaApp:
         self._pause()
 
     def settings(self) -> None:
-        handlers: Dict[str, Callable[[], None]] = {
-            "1": self.setting_color,
-            "2": self.setting_donor_root,
-            "3": self.setting_model_url,
-            "4": self.setting_model_name,
-            "5": self.setting_history,
-            "6": self.setting_timeout,
-        }
+        handlers = self.settings_handlers()
         while True:
             choice = select_menu("SETTINGS", SETTINGS_MENU, self.palette)
             if choice == "0":

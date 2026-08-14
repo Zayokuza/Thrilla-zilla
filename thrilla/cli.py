@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import sys
+from pathlib import Path
 from typing import Optional, Sequence
 
 from . import __version__
@@ -11,6 +13,15 @@ from .config import Config
 from .diagnostics import run_checks
 from .donors import DonorRegistry
 from .router import route_request
+from .release_stage import (
+    ReleaseStageError,
+    install_release,
+    prune_releases,
+    release_status,
+    rollback_release,
+    write_posix_launcher,
+    write_windows_launcher,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +53,76 @@ def build_parser() -> argparse.ArgumentParser:
     logs = subparsers.add_parser("logs", help="show recent activity metadata")
     logs.add_argument("-n", "--count", type=int, default=20)
     logs.add_argument("--json", action="store_true")
+
+    release = subparsers.add_parser(
+        "release",
+        help="atomic install, update and rollback controls",
+    )
+    release_actions = release.add_subparsers(
+        dest="release_action",
+        required=True,
+    )
+
+    release_status_parser = release_actions.add_parser(
+        "status",
+        help="show active and previous releases",
+    )
+    release_status_parser.add_argument("--state-root")
+    release_status_parser.add_argument(
+        "--json",
+        action="store_true",
+    )
+
+    release_install = release_actions.add_parser(
+        "install",
+        help="stage, test and atomically activate local source",
+    )
+    release_install.add_argument(
+        "--project-root",
+        required=True,
+    )
+    release_install.add_argument("--state-root")
+    release_install.add_argument(
+        "--commit",
+        required=True,
+    )
+    release_install.add_argument("--timestamp")
+    release_install.add_argument("--launcher")
+    release_install.add_argument(
+        "--launcher-platform",
+        choices=("posix", "windows"),
+        default="posix",
+    )
+    release_install.add_argument(
+        "--json",
+        action="store_true",
+    )
+
+    release_rollback = release_actions.add_parser(
+        "rollback",
+        help="switch back to the previous verified release",
+    )
+    release_rollback.add_argument("--state-root")
+    release_rollback.add_argument(
+        "--json",
+        action="store_true",
+    )
+
+    release_prune = release_actions.add_parser(
+        "prune",
+        help="remove old inactive releases",
+    )
+    release_prune.add_argument("--state-root")
+    release_prune.add_argument(
+        "--keep-newest",
+        type=int,
+        default=5,
+    )
+    release_prune.add_argument(
+        "--json",
+        action="store_true",
+    )
+
     return parser
 
 
@@ -99,6 +180,128 @@ def _doctor_command(arguments: argparse.Namespace, config: Config) -> int:
     return 1 if any(check.level == "fail" for check in checks) else 0
 
 
+
+def _release_state_root(
+    arguments: argparse.Namespace,
+    config: Config,
+) -> Path:
+    configured = getattr(
+        arguments,
+        "state_root",
+        None,
+    )
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else config.state_path.resolve()
+    )
+
+
+def _release_command(
+    arguments: argparse.Namespace,
+    config: Config,
+) -> int:
+    state = _release_state_root(
+        arguments,
+        config,
+    )
+
+    try:
+        if arguments.release_action == "status":
+            payload = release_status(state)
+
+        elif arguments.release_action == "install":
+            payload = install_release(
+                Path(arguments.project_root),
+                state,
+                commit=arguments.commit,
+                timestamp=arguments.timestamp,
+                python_executable=sys.executable,
+            )
+
+            if arguments.launcher:
+                launcher = Path(
+                    arguments.launcher
+                )
+
+                if arguments.launcher_platform == "windows":
+                    write_windows_launcher(
+                        launcher,
+                        state,
+                        python_executable=sys.executable,
+                    )
+                else:
+                    write_posix_launcher(
+                        launcher,
+                        state,
+                        python_executable=sys.executable,
+                    )
+
+                payload = dict(payload)
+                payload["launcher"] = str(
+                    launcher.expanduser().resolve()
+                )
+
+        elif arguments.release_action == "rollback":
+            active = rollback_release(
+                state,
+                python_executable=sys.executable,
+            )
+            payload = release_status(state)
+            payload["rolled_back_to"] = active
+
+        elif arguments.release_action == "prune":
+            removed = prune_releases(
+                state,
+                keep_newest=arguments.keep_newest,
+            )
+            payload = release_status(state)
+            payload["removed"] = removed
+
+        else:
+            raise ReleaseStageError(
+                "Unknown release action."
+            )
+
+    except (ReleaseStageError, OSError) as error:
+        print(
+            f"Release operation failed: {error}",
+            file=sys.stderr,
+        )
+        return 1
+
+    as_json = getattr(
+        arguments,
+        "json",
+        False,
+    )
+
+    if as_json:
+        print(
+            json.dumps(
+                payload,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(
+            f"Current: {payload.get('current', payload.get('release_id', 'none'))}"
+        )
+
+        if "previous" in payload:
+            print(
+                f"Previous: {payload.get('previous') or 'none'}"
+            )
+
+        if "removed" in payload:
+            print(
+                f"Removed: {len(payload['removed'])}"
+            )
+
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
@@ -133,5 +336,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         records = ThrillaApp(config).audit.tail(max(0, arguments.count))
         print(json.dumps(records, indent=2) if arguments.json else "\n".join(json.dumps(record) for record in records))
         return 0
+    if command == "release":
+        return _release_command(arguments, config)
     parser.error(f"Unknown command: {command}")
     return 2

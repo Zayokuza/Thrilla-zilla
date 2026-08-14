@@ -26,16 +26,26 @@ class ModelError(RuntimeError):
     pass
 
 
+_REMOTE_POLICY_UNSET = object()
+
+
 def _is_local_url(url: str) -> bool:
     hostname = (urllib.parse.urlparse(url).hostname or "").lower()
     return hostname in {"127.0.0.1", "localhost", "::1"}
 
 
 class LocalModelClient:
-    def __init__(self, url: str, model: str, timeout: float = 90.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        model: str,
+        timeout: Optional[float] = 90.0,
+        remote_policy: object = _REMOTE_POLICY_UNSET,
+    ) -> None:
         self.url = url
         self.model = model
         self.timeout = timeout
+        self.remote_policy = remote_policy
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -47,8 +57,21 @@ class LocalModelClient:
     def _allow_url(self) -> None:
         if _is_local_url(self.url):
             return
+
+        if self.remote_policy is True:
+            return
+
+        if self.remote_policy is None:
+            return
+
+        if self.remote_policy is False:
+            raise ModelError(
+                "Remote model URLs are blocked by Thrilla Limit Control."
+            )
+
         if os.environ.get("THRILLA_ALLOW_REMOTE_MODEL") == "1":
             return
+
         raise ModelError(
             "Remote model URLs are blocked by default. Set "
             "THRILLA_ALLOW_REMOTE_MODEL=1 only if you accept sending prompts remotely."
