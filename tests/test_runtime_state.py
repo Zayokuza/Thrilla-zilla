@@ -615,6 +615,92 @@ class RuntimeStateMachineTests(unittest.TestCase):
             transition.next,
         )
 
+    def test_state_machine_allows_crashed_to_recovering(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.CRASHED,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.RECOVERING,
+                actor="RuntimeManager",
+                reason="unexpected managed runtime exit detected",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=0.0,
+                result="recovery_started",
+            )
+        except Exception as error:
+            self.fail(
+                "CRASHED -> RECOVERING must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.RECOVERING,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.CRASHED,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.RECOVERING,
+            transition.next,
+        )
+        self.assertEqual(
+            "recovery_started",
+            transition.result,
+        )
+
+    def test_state_machine_allows_recovering_to_starting(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.RECOVERING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.STARTING,
+                actor="RuntimeManager",
+                reason="recovery retry starting managed runtime",
+                model="/models/example.gguf",
+                pid=0,
+                elapsed=0.25,
+                result="restart_started",
+            )
+        except Exception as error:
+            self.fail(
+                "RECOVERING -> STARTING must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.STARTING,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.RECOVERING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.STARTING,
+            transition.next,
+        )
+        self.assertEqual(
+            "restart_started",
+            transition.result,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

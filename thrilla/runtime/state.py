@@ -95,6 +95,12 @@ class RuntimeStateMachine:
             RuntimeState.STOPPING: {
                 RuntimeState.STOPPED,
             },
+            RuntimeState.CRASHED: {
+                RuntimeState.RECOVERING,
+            },
+            RuntimeState.RECOVERING: {
+                RuntimeState.STARTING,
+            },
         }
 
         if next_state not in allowed.get(self.current, set()):
