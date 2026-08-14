@@ -22,3 +22,17 @@ def find_llama_server() -> Optional[str]:
         return str(candidate)
 
     return None
+
+def discover_gguf_files(roots):
+    """Return GGUF files found recursively beneath the supplied roots."""
+    found = set()
+
+    for root in roots:
+        root_path = Path(root)
+
+        for candidate in root_path.rglob("*.gguf"):
+            if candidate.is_file():
+                found.add(str(candidate.resolve()))
+
+    return sorted(found)
+

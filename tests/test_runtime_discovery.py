@@ -85,6 +85,68 @@ class RuntimeDiscoveryTests(unittest.TestCase):
                 Path(found).resolve(),
             )
 
+    def test_discover_gguf_files_recursively_finds_models(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "models" / "coding"
+            nested.mkdir(parents=True)
+
+            model = nested / "coder.gguf"
+            model.write_bytes(b"GGUF")
+
+            ignored = nested / "notes.txt"
+            ignored.write_text(
+                "not a model",
+                encoding="utf-8",
+            )
+
+            discovery = importlib.import_module(
+                "thrilla.runtime.discovery"
+            )
+
+            discover = getattr(
+                discovery,
+                "discover_gguf_files",
+                None,
+            )
+
+            self.assertTrue(
+                callable(discover),
+                "discover_gguf_files must exist",
+            )
+
+            found = discover([root])
+
+            self.assertEqual(
+                [str(model.resolve())],
+                found,
+            )
+
+    def test_discover_gguf_files_deduplicates_overlapping_roots(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            models = root / "models"
+            models.mkdir()
+
+            model = models / "primary.gguf"
+            model.write_bytes(b"GGUF")
+
+            discovery = importlib.import_module(
+                "thrilla.runtime.discovery"
+            )
+
+            found = discovery.discover_gguf_files(
+                [
+                    root,
+                    root,
+                ]
+            )
+
+            self.assertEqual(
+                [str(model.resolve())],
+                found,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
