@@ -88,9 +88,11 @@ class RuntimeStateMachine:
             RuntimeState.READY: {
                 RuntimeState.BUSY,
                 RuntimeState.STOPPING,
+                RuntimeState.CRASHED,
             },
             RuntimeState.BUSY: {
                 RuntimeState.READY,
+                RuntimeState.CRASHED,
             },
             RuntimeState.STOPPING: {
                 RuntimeState.STOPPED,

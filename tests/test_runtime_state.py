@@ -701,6 +701,92 @@ class RuntimeStateMachineTests(unittest.TestCase):
             transition.result,
         )
 
+    def test_state_machine_allows_ready_to_crashed(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.READY,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.CRASHED,
+                actor="RuntimeManager",
+                reason="managed runtime exited unexpectedly while ready",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=12.5,
+                result="runtime_crashed",
+            )
+        except Exception as error:
+            self.fail(
+                "READY -> CRASHED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.CRASHED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.READY,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.CRASHED,
+            transition.next,
+        )
+        self.assertEqual(
+            "runtime_crashed",
+            transition.result,
+        )
+
+    def test_state_machine_allows_busy_to_crashed(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.BUSY,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.CRASHED,
+                actor="RuntimeManager",
+                reason="managed runtime exited unexpectedly while busy",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=3.5,
+                result="runtime_crashed",
+            )
+        except Exception as error:
+            self.fail(
+                "BUSY -> CRASHED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.CRASHED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.BUSY,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.CRASHED,
+            transition.next,
+        )
+        self.assertEqual(
+            "runtime_crashed",
+            transition.result,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
