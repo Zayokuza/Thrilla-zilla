@@ -334,6 +334,162 @@ class RuntimeStateMachineTests(unittest.TestCase):
             transition.next,
         )
 
+    def test_state_machine_allows_stopping_to_stopped(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.STOPPING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.STOPPED,
+                actor="RuntimeManager",
+                reason="managed runtime exited cleanly",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=0.50,
+                result="stopped",
+            )
+        except Exception as error:
+            self.fail(
+                "STOPPING -> STOPPED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.STOPPED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.STOPPING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.STOPPED,
+            transition.next,
+        )
+
+    def test_state_machine_allows_unknown_to_discovering(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.UNKNOWN,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.DISCOVERING,
+                actor="RuntimeManager",
+                reason="runtime discovery started",
+                model="",
+                pid=0,
+                elapsed=0.0,
+                result="discovering",
+            )
+        except Exception as error:
+            self.fail(
+                "UNKNOWN -> DISCOVERING must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.DISCOVERING,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.UNKNOWN,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.DISCOVERING,
+            transition.next,
+        )
+
+    def test_state_machine_allows_discovering_to_selecting(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.DISCOVERING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.SELECTING,
+                actor="RuntimeManager",
+                reason="runtime and model discovery completed",
+                model="",
+                pid=0,
+                elapsed=0.25,
+                result="selecting",
+            )
+        except Exception as error:
+            self.fail(
+                "DISCOVERING -> SELECTING must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.SELECTING,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.DISCOVERING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.SELECTING,
+            transition.next,
+        )
+
+    def test_state_machine_allows_selecting_to_starting(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.SELECTING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.STARTING,
+                actor="RuntimeManager",
+                reason="model selected for managed startup",
+                model="/models/example.gguf",
+                pid=0,
+                elapsed=0.10,
+                result="starting",
+            )
+        except Exception as error:
+            self.fail(
+                "SELECTING -> STARTING must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.STARTING,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.SELECTING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.STARTING,
+            transition.next,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

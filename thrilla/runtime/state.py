@@ -61,6 +61,15 @@ class RuntimeStateMachine:
         result: str,
     ) -> StateTransition:
         allowed = {
+            RuntimeState.UNKNOWN: {
+                RuntimeState.DISCOVERING,
+            },
+            RuntimeState.DISCOVERING: {
+                RuntimeState.SELECTING,
+            },
+            RuntimeState.SELECTING: {
+                RuntimeState.STARTING,
+            },
             RuntimeState.STOPPED: {
                 RuntimeState.STARTING,
             },
@@ -79,6 +88,9 @@ class RuntimeStateMachine:
             },
             RuntimeState.BUSY: {
                 RuntimeState.READY,
+            },
+            RuntimeState.STOPPING: {
+                RuntimeState.STOPPED,
             },
         }
 
