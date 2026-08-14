@@ -75,12 +75,15 @@ class RuntimeStateMachine:
             },
             RuntimeState.STARTING: {
                 RuntimeState.LOADING_MODEL,
+                RuntimeState.FAILED,
             },
             RuntimeState.LOADING_MODEL: {
                 RuntimeState.HEALTH_CHECKING,
+                RuntimeState.FAILED,
             },
             RuntimeState.HEALTH_CHECKING: {
                 RuntimeState.READY,
+                RuntimeState.FAILED,
             },
             RuntimeState.READY: {
                 RuntimeState.BUSY,

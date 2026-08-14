@@ -490,6 +490,131 @@ class RuntimeStateMachineTests(unittest.TestCase):
             transition.next,
         )
 
+    def test_state_machine_allows_starting_to_failed(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.STARTING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.FAILED,
+                actor="RuntimeManager",
+                reason="managed runtime failed to start",
+                model="/models/example.gguf",
+                pid=0,
+                elapsed=1.25,
+                result="startup_failed",
+            )
+        except Exception as error:
+            self.fail(
+                "STARTING -> FAILED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.STARTING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            transition.next,
+        )
+        self.assertEqual(
+            "managed runtime failed to start",
+            transition.reason,
+        )
+        self.assertEqual(
+            "startup_failed",
+            transition.result,
+        )
+
+    def test_state_machine_allows_loading_model_to_failed(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.LOADING_MODEL,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.FAILED,
+                actor="RuntimeManager",
+                reason="model load failed",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=1.75,
+                result="load_failed",
+            )
+        except Exception as error:
+            self.fail(
+                "LOADING_MODEL -> FAILED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.LOADING_MODEL,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            transition.next,
+        )
+
+    def test_state_machine_allows_health_checking_to_failed(self):
+        state = importlib.import_module("thrilla.runtime.state")
+
+        machine = state.RuntimeStateMachine(
+            initial=state.RuntimeState.HEALTH_CHECKING,
+        )
+
+        try:
+            transition = machine.transition(
+                state.RuntimeState.FAILED,
+                actor="RuntimeManager",
+                reason="runtime readiness check failed",
+                model="/models/example.gguf",
+                pid=12345,
+                elapsed=0.75,
+                result="health_failed",
+            )
+        except Exception as error:
+            self.fail(
+                "HEALTH_CHECKING -> FAILED must be legal: {0}".format(
+                    error
+                )
+            )
+
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            machine.current,
+        )
+        self.assertEqual(1, len(machine.history))
+        self.assertIs(transition, machine.history[0])
+        self.assertEqual(
+            state.RuntimeState.HEALTH_CHECKING,
+            transition.previous,
+        )
+        self.assertEqual(
+            state.RuntimeState.FAILED,
+            transition.next,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
