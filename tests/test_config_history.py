@@ -48,6 +48,25 @@ class ConfigHistoryTests(unittest.TestCase):
             history.append("user", "private text")
             self.assertEqual([], history.records(limit=0))
 
+    def test_none_history_turn_limit_returns_all_messages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            history = ConversationHistory(Path(temporary))
+
+            for index in range(3):
+                history.append("user", "question {0}".format(index))
+                history.append("assistant", "answer {0}".format(index))
+
+            try:
+                messages = history.messages(turns=None)
+            except TypeError as error:
+                self.fail(
+                    "turns=None must mean no Thrilla-imposed history cap: {0}".format(
+                        error
+                    )
+                )
+
+            self.assertEqual(6, len(messages))
+
 
 if __name__ == "__main__":
     unittest.main()

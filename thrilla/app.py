@@ -68,10 +68,18 @@ class ThrillaApp:
         self.message = ""
 
     def _model_client(self) -> LocalModelClient:
+        timeout = self.config.resolve_limit(
+            "model.request_timeout"
+        ).value
+        remote_policy = self.config.resolve_limit(
+            "network.remote_model"
+        ).value
+
         return LocalModelClient(
             self.config.model_url,
             self.config.model_name,
-            self.config.request_timeout,
+            timeout,
+            remote_policy=remote_policy,
         )
 
     def _refresh(self) -> None:
@@ -239,7 +247,14 @@ class ThrillaApp:
             print(self.palette.muted(
                 f"route: {decision.route.value}  •  confidence: {decision.confidence:.0%}  •  {decision.explanation}"
             ))
-            previous = self.history.messages(self.config.history_turns) if self.config.save_history else []
+            history_turns = self.config.resolve_limit(
+                "memory.history_turns"
+            ).value
+            previous = (
+                self.history.messages(history_turns)
+                if self.config.save_history
+                else []
+            )
             messages = [*previous, {"role": "user", "content": prompt}]
             if self.config.save_history:
                 self.history.append("user", prompt, decision.route.value)
@@ -347,7 +362,13 @@ class ThrillaApp:
             return
         spec = specs[0]
         state = self.registry.inspect(spec)
-        details = self.registry.verify_git(spec)
+        git_timeout = self.config.resolve_limit(
+            "donor.git_timeout"
+        ).value
+        details = self.registry.verify_git(
+            spec,
+            timeout=git_timeout,
+        )
         self._status("Repository", spec.repository)
         self._status("Path", str(state.path), "pass" if state.present else "fail")
         self._status("State", state.state, "pass" if state.present else "fail")

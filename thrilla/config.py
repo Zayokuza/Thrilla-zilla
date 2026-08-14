@@ -2,9 +2,11 @@
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
+
+from .limits import DEFAULT_LIMITS
 
 
 @dataclass
@@ -17,6 +19,9 @@ class Config:
     request_timeout: float = 90.0
     save_history: bool = True
     history_turns: int = 12
+    limit_default_mode: str = "auto"
+    limit_modes: Dict[str, str] = field(default_factory=dict)
+    limit_values: Dict[str, object] = field(default_factory=dict)
 
     @classmethod
     def defaults(cls) -> "Config":
@@ -55,6 +60,28 @@ class Config:
         for variable, field in env_map.items():
             if variable in os.environ:
                 setattr(config, field, os.environ[variable])
+        valid_limit_modes = {"on", "auto", "off"}
+
+        if config.limit_default_mode not in valid_limit_modes:
+            config.limit_default_mode = "auto"
+
+        if not isinstance(config.limit_modes, dict):
+            config.limit_modes = {}
+        else:
+            config.limit_modes = {
+                str(name): mode
+                for name, mode in config.limit_modes.items()
+                if mode in valid_limit_modes
+            }
+
+        if not isinstance(config.limit_values, dict):
+            config.limit_values = {}
+        else:
+            config.limit_values = {
+                str(name): value
+                for name, value in config.limit_values.items()
+            }
+
         if config.color_mode not in {"auto", "always", "never"}:
             config.color_mode = "auto"
         try:
@@ -85,6 +112,40 @@ class Config:
         )
         temporary.replace(config_path)
         return config_path
+
+    def resolve_limit(self, name: str, auto_value: object = None):
+        """Resolve one registered limit using stored configuration."""
+
+        mode = self.limit_modes.get(name, self.limit_default_mode)
+
+        legacy_values = {
+            "model.request_timeout": self.request_timeout,
+            "memory.history_turns": self.history_turns,
+            "donor.git_timeout": 4.0,
+            "network.remote_model": (
+                os.environ.get("THRILLA_ALLOW_REMOTE_MODEL") == "1"
+            ),
+        }
+
+        has_configured_value = name in self.limit_values
+
+        if has_configured_value:
+            configured_value = self.limit_values[name]
+        else:
+            configured_value = legacy_values.get(name)
+
+        if auto_value is None:
+            if has_configured_value:
+                auto_value = configured_value
+            elif name in legacy_values:
+                auto_value = legacy_values[name]
+
+        return DEFAULT_LIMITS.resolve(
+            name,
+            mode=mode,
+            configured_value=configured_value,
+            auto_value=auto_value,
+        )
 
     @property
     def donor_path(self) -> Path:
