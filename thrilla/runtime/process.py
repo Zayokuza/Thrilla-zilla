@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 
 class ProcessOwnership(str, Enum):
@@ -39,6 +39,18 @@ class ManagedProcessHandle:
 
     record: RuntimeProcessRecord
     process: subprocess.Popen
+
+
+@dataclass(frozen=True)
+class ShutdownResult:
+    """Observed result from one managed shutdown request."""
+
+    authorized: bool
+    already_stopped: bool
+    terminated: bool
+    escalated: bool
+    returncode: Optional[int]
+    detail: str
 
 def can_control_process(
     record: RuntimeProcessRecord,
@@ -108,3 +120,78 @@ def spawn_managed_process(
         record=record,
         process=child,
     )
+
+def shutdown_managed_process(
+    handle: ManagedProcessHandle,
+    owner_token: str,
+    timeout: Optional[float],
+) -> ShutdownResult:
+    """Stop only a process whose Thrilla ownership is proven."""
+    if handle.process.pid != handle.record.pid:
+        return ShutdownResult(
+            authorized=False,
+            already_stopped=False,
+            terminated=False,
+            escalated=False,
+            returncode=handle.process.poll(),
+            detail="runtime PID proof rejected",
+        )
+
+    if not can_control_process(
+        handle.record,
+        owner_token,
+    ):
+        return ShutdownResult(
+            authorized=False,
+            already_stopped=False,
+            terminated=False,
+            escalated=False,
+            returncode=handle.process.poll(),
+            detail="runtime ownership proof rejected",
+        )
+
+    current_returncode = handle.process.poll()
+
+    if current_returncode is not None:
+        return ShutdownResult(
+            authorized=True,
+            already_stopped=True,
+            terminated=False,
+            escalated=False,
+            returncode=current_returncode,
+            detail="managed runtime was already stopped",
+        )
+
+    handle.process.terminate()
+
+    try:
+        returncode = handle.process.wait(
+            timeout=timeout,
+        )
+
+        return ShutdownResult(
+            authorized=True,
+            already_stopped=False,
+            terminated=True,
+            escalated=False,
+            returncode=returncode,
+            detail="managed runtime terminated gracefully",
+        )
+    except subprocess.TimeoutExpired:
+        handle.process.kill()
+
+        returncode = handle.process.wait(
+            timeout=timeout,
+        )
+
+        return ShutdownResult(
+            authorized=True,
+            already_stopped=False,
+            terminated=True,
+            escalated=True,
+            returncode=returncode,
+            detail=(
+                "managed runtime required forced "
+                "termination after graceful timeout"
+            ),
+        )

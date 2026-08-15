@@ -1,7 +1,9 @@
 import importlib
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -576,6 +578,353 @@ class RuntimeProcessTests(unittest.TestCase):
                 _stop_test_process(
                     handle.process
                 )
+
+    def test_shutdown_refuses_unproven_or_external_ownership(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        shutdown = getattr(
+            process,
+            "shutdown_managed_process",
+            None,
+        )
+
+        result_type = getattr(
+            process,
+            "ShutdownResult",
+            None,
+        )
+
+        self.assertTrue(
+            callable(shutdown),
+            "shutdown_managed_process must exist",
+        )
+
+        self.assertTrue(
+            callable(result_type),
+            "ShutdownResult must exist",
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            command = (
+                sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="shutdown-auth.gguf",
+                port=8401,
+                log_path=str(
+                    Path(temp) / "auth.log"
+                ),
+            )
+
+            try:
+                wrong_token = shutdown(
+                    handle=handle,
+                    owner_token="wrong-owner-token",
+                    timeout=0.1,
+                )
+
+                self.assertFalse(
+                    wrong_token.authorized,
+                    "wrong owner token must refuse shutdown",
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    "wrong token must not stop managed child",
+                )
+
+                external_record = process.RuntimeProcessRecord(
+                    ownership=process.ProcessOwnership.EXTERNAL,
+                    pid=handle.record.pid,
+                    executable=handle.record.executable,
+                    command=handle.record.command,
+                    model=handle.record.model,
+                    port=handle.record.port,
+                    start_time=handle.record.start_time,
+                    owner_token="",
+                    log_path=handle.record.log_path,
+                )
+
+                external_handle = process.ManagedProcessHandle(
+                    record=external_record,
+                    process=handle.process,
+                )
+
+                external = shutdown(
+                    handle=external_handle,
+                    owner_token=handle.record.owner_token,
+                    timeout=0.1,
+                )
+
+                self.assertFalse(
+                    external.authorized,
+                    "external ownership must refuse shutdown",
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    "external record must not stop child",
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_shutdown_managed_process_terminates_owned_child(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            command = (
+                sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="shutdown-owned.gguf",
+                port=8402,
+                log_path=str(
+                    Path(temp) / "owned.log"
+                ),
+            )
+
+            try:
+                result = process.shutdown_managed_process(
+                    handle=handle,
+                    owner_token=handle.record.owner_token,
+                    timeout=1.0,
+                )
+
+                self.assertTrue(
+                    result.authorized,
+                )
+
+                self.assertTrue(
+                    result.terminated,
+                )
+
+                self.assertFalse(
+                    result.escalated,
+                )
+
+                self.assertFalse(
+                    result.already_stopped,
+                )
+
+                self.assertIsNotNone(
+                    handle.process.poll(),
+                    "owned managed child must stop",
+                )
+
+                self.assertEqual(
+                    handle.process.returncode,
+                    result.returncode,
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_shutdown_managed_process_escalates_after_timeout(self):
+        if os.name == "nt":
+            self.skipTest(
+                "Windows terminate is already forceful"
+            )
+
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "ignore-term.log"
+
+            command = (
+                sys.executable,
+                "-c",
+                (
+                    "import signal,time; "
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                    "print('TERM-IGNORE-READY', flush=True); "
+                    "time.sleep(30)"
+                ),
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="shutdown-escalate.gguf",
+                port=8403,
+                log_path=str(log_path),
+            )
+
+            try:
+                deadline = time.monotonic() + 2.0
+
+                while time.monotonic() < deadline:
+                    if (
+                        log_path.exists()
+                        and "TERM-IGNORE-READY"
+                        in log_path.read_text(
+                            encoding="utf-8"
+                        )
+                    ):
+                        break
+
+                    time.sleep(0.01)
+                else:
+                    self.fail(
+                        "test child never installed SIGTERM handler"
+                    )
+
+                result = process.shutdown_managed_process(
+                    handle=handle,
+                    owner_token=handle.record.owner_token,
+                    timeout=0.05,
+                )
+
+                self.assertTrue(
+                    result.authorized,
+                )
+
+                self.assertTrue(
+                    result.terminated,
+                )
+
+                self.assertTrue(
+                    result.escalated,
+                    "shutdown timeout must escalate to kill",
+                )
+
+                self.assertIsNotNone(
+                    handle.process.poll(),
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_shutdown_refuses_record_pid_mismatch(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            command = (
+                sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+            )
+
+            original = process.spawn_managed_process(
+                command=command,
+                model="pid-proof.gguf",
+                port=8404,
+                log_path=str(
+                    Path(temp) / "pid.log"
+                ),
+            )
+
+            mismatched_record = process.RuntimeProcessRecord(
+                ownership=process.ProcessOwnership.THRILLA_MANAGED,
+                pid=original.record.pid + 1,
+                executable=original.record.executable,
+                command=original.record.command,
+                model=original.record.model,
+                port=original.record.port,
+                start_time=original.record.start_time,
+                owner_token=original.record.owner_token,
+                log_path=original.record.log_path,
+            )
+
+            mismatched_handle = process.ManagedProcessHandle(
+                record=mismatched_record,
+                process=original.process,
+            )
+
+            try:
+                result = process.shutdown_managed_process(
+                    handle=mismatched_handle,
+                    owner_token=mismatched_record.owner_token,
+                    timeout=0.1,
+                )
+
+                self.assertFalse(
+                    result.authorized,
+                    "PID mismatch must refuse shutdown",
+                )
+
+                self.assertIsNone(
+                    original.process.poll(),
+                    "PID mismatch must not stop actual child",
+                )
+            finally:
+                _stop_test_process(
+                    original.process
+                )
+
+    def test_shutdown_reports_already_exited_managed_child(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            command = (
+                sys.executable,
+                "-c",
+                "pass",
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="already-stopped.gguf",
+                port=8405,
+                log_path=str(
+                    Path(temp) / "stopped.log"
+                ),
+            )
+
+            handle.process.wait(
+                timeout=5.0
+            )
+
+            result = process.shutdown_managed_process(
+                handle=handle,
+                owner_token=handle.record.owner_token,
+                timeout=0.1,
+            )
+
+            self.assertTrue(
+                result.authorized,
+            )
+
+            self.assertTrue(
+                result.already_stopped,
+                (
+                    "already exited process must be "
+                    "reported as already stopped"
+                ),
+            )
+
+            self.assertFalse(
+                result.terminated,
+            )
+
+            self.assertFalse(
+                result.escalated,
+            )
+
+            self.assertEqual(
+                handle.process.returncode,
+                result.returncode,
+            )
 
 
 if __name__ == "__main__":
