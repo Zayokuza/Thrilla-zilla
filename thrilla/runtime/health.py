@@ -1,6 +1,7 @@
 """Inspection of existing OpenAI-compatible local model services."""
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -36,6 +37,18 @@ class ExistingServerInspection:
     expected_model: str
     model_match: bool
     reusable: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class ReadinessResult:
+    """Result of waiting for an expected model endpoint."""
+
+    ready: bool
+    timed_out: bool
+    attempts: int
+    elapsed_seconds: float
+    models: Tuple[str, ...]
     detail: str
 
 def probe_models_endpoint(
@@ -173,3 +186,67 @@ def inspect_existing_server(
         reusable=reusable,
         detail=probe.detail,
     )
+
+def wait_for_model_readiness(
+    host: str,
+    port: int,
+    expected_model: str,
+    startup_timeout: float = 5.0,
+    probe_timeout: float = 0.5,
+    poll_interval: float = 0.1,
+) -> ReadinessResult:
+    """Check whether the expected model is currently ready."""
+    started = time.monotonic()
+    deadline = started + startup_timeout
+    attempts = 0
+
+    while True:
+        attempts += 1
+
+        probe = probe_models_endpoint(
+            host=host,
+            port=port,
+            timeout=probe_timeout,
+            expected_model=expected_model,
+        )
+
+        if (
+            probe.openai_compatible
+            and probe.model_match
+        ):
+            return ReadinessResult(
+                ready=True,
+                timed_out=False,
+                attempts=attempts,
+                elapsed_seconds=(
+                    time.monotonic()
+                    - started
+                ),
+                models=probe.models,
+                detail=probe.detail,
+            )
+
+        now = time.monotonic()
+
+        if now >= deadline:
+            return ReadinessResult(
+                ready=False,
+                timed_out=True,
+                attempts=attempts,
+                elapsed_seconds=(
+                    now
+                    - started
+                ),
+                models=probe.models,
+                detail=probe.detail,
+            )
+
+        time.sleep(
+            min(
+                poll_interval,
+                max(
+                    0.0,
+                    deadline - now,
+                ),
+            )
+        )

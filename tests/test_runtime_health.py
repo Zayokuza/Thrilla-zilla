@@ -76,6 +76,76 @@ def _http_server(payload, status=200):
         thread.join(timeout=2.0)
 
 
+class _SequenceModelsHandler(BaseHTTPRequestHandler):
+    payloads = ()
+    request_count = 0
+
+    def do_GET(self):
+        if self.path != "/v1/models":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        index = min(
+            type(self).request_count,
+            len(type(self).payloads) - 1,
+        )
+
+        payload = type(self).payloads[index]
+        type(self).request_count += 1
+
+        body = json.dumps(
+            payload
+        ).encode("utf-8")
+
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "application/json",
+        )
+        self.send_header(
+            "Content-Length",
+            str(len(body)),
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+
+@contextmanager
+def _sequence_http_server(payloads):
+    handler = type(
+        "ConfiguredSequenceModelsHandler",
+        (_SequenceModelsHandler,),
+        {
+            "payloads": tuple(payloads),
+            "request_count": 0,
+        },
+    )
+
+    server = HTTPServer(
+        (
+            "127.0.0.1",
+            0,
+        ),
+        handler,
+    )
+
+    thread = threading.Thread(
+        target=server.serve_forever,
+    )
+    thread.start()
+
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+
 class RuntimeHealthTests(unittest.TestCase):
 
     def test_probe_models_endpoint_reads_model_ids(self):
@@ -287,6 +357,163 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(
             (
                 "thrilla-primary",
+            ),
+            result.models,
+        )
+
+    def test_wait_for_model_readiness_accepts_expected_model(self):
+        health = importlib.import_module(
+            "thrilla.runtime.health"
+        )
+
+        waiter = getattr(
+            health,
+            "wait_for_model_readiness",
+            None,
+        )
+
+        result_type = getattr(
+            health,
+            "ReadinessResult",
+            None,
+        )
+
+        self.assertTrue(
+            callable(waiter),
+            "wait_for_model_readiness must exist",
+        )
+
+        self.assertTrue(
+            callable(result_type),
+            "ReadinessResult must exist",
+        )
+
+        payload = {
+            "object": "list",
+            "data": [
+                {
+                    "id": "thrilla-ready-model",
+                }
+            ],
+        }
+
+        with _http_server(payload) as server:
+            result = waiter(
+                host="127.0.0.1",
+                port=server.server_address[1],
+                expected_model="thrilla-ready-model",
+                startup_timeout=0.5,
+                probe_timeout=0.2,
+                poll_interval=0.01,
+            )
+
+        self.assertIsInstance(
+            result,
+            result_type,
+        )
+
+        self.assertTrue(
+            result.ready,
+        )
+
+        self.assertEqual(
+            (
+                "thrilla-ready-model",
+            ),
+            result.models,
+        )
+
+        self.assertEqual(
+            1,
+            result.attempts,
+        )
+
+    def test_wait_for_model_readiness_polls_until_model_appears(self):
+        health = importlib.import_module(
+            "thrilla.runtime.health"
+        )
+
+        payloads = (
+            {
+                "object": "list",
+                "data": [],
+            },
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "delayed-model",
+                    }
+                ],
+            },
+        )
+
+        with _sequence_http_server(payloads) as server:
+            result = health.wait_for_model_readiness(
+                host="127.0.0.1",
+                port=server.server_address[1],
+                expected_model="delayed-model",
+                startup_timeout=0.5,
+                probe_timeout=0.2,
+                poll_interval=0.01,
+            )
+
+        self.assertTrue(
+            result.ready,
+            "readiness must poll until expected model appears",
+        )
+
+        self.assertGreaterEqual(
+            result.attempts,
+            2,
+        )
+
+        self.assertIn(
+            "delayed-model",
+            result.models,
+        )
+
+    def test_wait_for_model_readiness_reports_timeout(self):
+        health = importlib.import_module(
+            "thrilla.runtime.health"
+        )
+
+        payload = {
+            "object": "list",
+            "data": [
+                {
+                    "id": "wrong-model",
+                }
+            ],
+        }
+
+        with _http_server(payload) as server:
+            result = health.wait_for_model_readiness(
+                host="127.0.0.1",
+                port=server.server_address[1],
+                expected_model="expected-model",
+                startup_timeout=0.05,
+                probe_timeout=0.02,
+                poll_interval=0.01,
+            )
+
+        self.assertFalse(
+            result.ready,
+        )
+
+        self.assertTrue(
+            result.timed_out,
+            "readiness timeout must be reported",
+        )
+
+        self.assertGreaterEqual(
+            result.attempts,
+            1,
+        )
+
+        self.assertEqual(
+            (
+                "wrong-model",
             ),
             result.models,
         )
