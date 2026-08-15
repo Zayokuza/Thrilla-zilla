@@ -1,9 +1,12 @@
 """Runtime process ownership metadata."""
 
 import hmac
+import secrets
+import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import Tuple
+from typing import Sequence, Tuple
 
 
 class ProcessOwnership(str, Enum):
@@ -28,6 +31,14 @@ class RuntimeProcessRecord:
 
 
 
+
+@dataclass(frozen=True)
+class ManagedProcessHandle:
+    """Live child handle paired with Thrilla ownership metadata."""
+
+    record: RuntimeProcessRecord
+    process: subprocess.Popen
+
 def can_control_process(
     record: RuntimeProcessRecord,
     owner_token: str,
@@ -42,4 +53,43 @@ def can_control_process(
             record.owner_token,
             owner_token,
         )
+    )
+
+def spawn_managed_process(
+    command: Sequence[str],
+    model: str,
+    port: int,
+    log_path: str,
+) -> ManagedProcessHandle:
+    """Spawn one Thrilla-managed runtime child process."""
+    command_tuple = tuple(command)
+
+    if not command_tuple:
+        raise ValueError(
+            "command must not be empty"
+        )
+
+    child = subprocess.Popen(
+        list(command_tuple),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        shell=False,
+    )
+
+    record = RuntimeProcessRecord(
+        ownership=ProcessOwnership.THRILLA_MANAGED,
+        pid=child.pid,
+        executable=command_tuple[0],
+        command=command_tuple,
+        model=model,
+        port=port,
+        start_time=datetime.now().astimezone().isoformat(),
+        owner_token=secrets.token_urlsafe(32),
+        log_path=log_path,
+    )
+
+    return ManagedProcessHandle(
+        record=record,
+        process=child,
     )
