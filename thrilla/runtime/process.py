@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Sequence, Tuple
 
 
@@ -69,13 +70,27 @@ def spawn_managed_process(
             "command must not be empty"
         )
 
-    child = subprocess.Popen(
-        list(command_tuple),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        shell=False,
+    log_file_path = Path(log_path)
+
+    log_file_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
     )
+
+    log_file = log_file_path.open(
+        "ab"
+    )
+
+    try:
+        child = subprocess.Popen(
+            list(command_tuple),
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            shell=False,
+        )
+    finally:
+        log_file.close()
 
     record = RuntimeProcessRecord(
         ownership=ProcessOwnership.THRILLA_MANAGED,

@@ -1,7 +1,9 @@
 import importlib
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 
 def _stop_test_process(child):
@@ -19,6 +21,18 @@ def _stop_test_process(child):
 
 
 class RuntimeProcessTests(unittest.TestCase):
+
+    def tearDown(self):
+        for filename in (
+            "thrilla-test.log",
+            "runtime-startup.log",
+            "first.log",
+            "second.log",
+        ):
+            try:
+                Path(filename).unlink()
+            except FileNotFoundError:
+                pass
 
     def test_process_ownership_defines_external_and_thrilla_managed(self):
         try:
@@ -405,6 +419,163 @@ class RuntimeProcessTests(unittest.TestCase):
             self.fail(
                 "empty command must be rejected"
             )
+
+    def test_spawn_managed_process_captures_stdout_and_stderr(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "startup.log"
+
+            command = (
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "print('THRILLA-START-OUT', flush=True); "
+                    "print('THRILLA-START-ERR', "
+                    "file=sys.stderr, flush=True)"
+                ),
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="startup-test.gguf",
+                port=8301,
+                log_path=str(log_path),
+            )
+
+            try:
+                handle.process.wait(
+                    timeout=5.0
+                )
+
+                self.assertTrue(
+                    log_path.exists(),
+                    "managed spawn must create startup log",
+                )
+
+                content = log_path.read_text(
+                    encoding="utf-8"
+                )
+
+                self.assertIn(
+                    "THRILLA-START-OUT",
+                    content,
+                )
+                self.assertIn(
+                    "THRILLA-START-ERR",
+                    content,
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_spawn_managed_process_creates_missing_log_directories(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = (
+                Path(temp)
+                / "runtime"
+                / "logs"
+                / "startup.log"
+            )
+
+            command = (
+                sys.executable,
+                "-c",
+                "print('NESTED-LOG-READY', flush=True)",
+            )
+
+            try:
+                handle = process.spawn_managed_process(
+                    command=command,
+                    model="nested-log.gguf",
+                    port=8302,
+                    log_path=str(log_path),
+                )
+            except FileNotFoundError:
+                self.fail(
+                    "spawn must create missing log parent directories"
+                )
+
+            try:
+                handle.process.wait(
+                    timeout=5.0
+                )
+
+                self.assertTrue(
+                    log_path.is_file(),
+                )
+
+                self.assertIn(
+                    "NESTED-LOG-READY",
+                    log_path.read_text(
+                        encoding="utf-8"
+                    ),
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_spawn_managed_process_appends_existing_startup_log(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "startup.log"
+
+            log_path.write_text(
+                "PREVIOUS-STARTUP\n",
+                encoding="utf-8",
+            )
+
+            command = (
+                sys.executable,
+                "-c",
+                "print('CURRENT-STARTUP', flush=True)",
+            )
+
+            handle = process.spawn_managed_process(
+                command=command,
+                model="append-test.gguf",
+                port=8303,
+                log_path=str(log_path),
+            )
+
+            try:
+                handle.process.wait(
+                    timeout=5.0
+                )
+
+                content = log_path.read_text(
+                    encoding="utf-8"
+                )
+
+                self.assertIn(
+                    "PREVIOUS-STARTUP",
+                    content,
+                    (
+                        "existing startup log content "
+                        "must be preserved"
+                    ),
+                )
+
+                self.assertIn(
+                    "CURRENT-STARTUP",
+                    content,
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
 
 
 if __name__ == "__main__":
