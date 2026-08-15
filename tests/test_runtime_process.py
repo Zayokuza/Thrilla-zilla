@@ -926,6 +926,345 @@ class RuntimeProcessTests(unittest.TestCase):
                 result.returncode,
             )
 
+    def test_orphan_inspection_accepts_active_owned_process(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        inspector = getattr(
+            process,
+            "inspect_managed_process_orphan",
+            None,
+        )
+
+        result_type = getattr(
+            process,
+            "OrphanInspection",
+            None,
+        )
+
+        self.assertTrue(
+            callable(inspector),
+            "inspect_managed_process_orphan must exist",
+        )
+
+        self.assertTrue(
+            callable(result_type),
+            "OrphanInspection must exist",
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            handle = process.spawn_managed_process(
+                command=(
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ),
+                model="orphan-active.gguf",
+                port=8501,
+                log_path=str(
+                    Path(temp) / "active.log"
+                ),
+            )
+
+            try:
+                result = inspector(
+                    record=handle.record,
+                    live_process=handle.process,
+                    owner_token=handle.record.owner_token,
+                )
+
+                self.assertIsInstance(
+                    result,
+                    result_type,
+                )
+
+                self.assertTrue(
+                    result.trusted,
+                )
+
+                self.assertFalse(
+                    result.orphaned,
+                )
+
+                self.assertTrue(
+                    result.running,
+                )
+
+                self.assertTrue(
+                    result.pid_matches,
+                )
+
+                self.assertIsNone(
+                    result.returncode,
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    "orphan inspection must not stop active child",
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_orphan_inspection_marks_missing_live_process_handle(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            handle = process.spawn_managed_process(
+                command=(
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ),
+                model="orphan-missing-handle.gguf",
+                port=8502,
+                log_path=str(
+                    Path(temp) / "missing.log"
+                ),
+            )
+
+            try:
+                result = process.inspect_managed_process_orphan(
+                    record=handle.record,
+                    live_process=None,
+                    owner_token=handle.record.owner_token,
+                )
+
+                self.assertTrue(
+                    result.trusted,
+                )
+
+                self.assertTrue(
+                    result.orphaned,
+                    (
+                        "missing live process handle must "
+                        "orphan managed record"
+                    ),
+                )
+
+                self.assertFalse(
+                    result.running,
+                )
+
+                self.assertFalse(
+                    result.pid_matches,
+                )
+
+                self.assertIsNone(
+                    result.returncode,
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    (
+                        "missing-handle inspection must "
+                        "not signal original child"
+                    ),
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_orphan_inspection_rejects_untrusted_ownership(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            handle = process.spawn_managed_process(
+                command=(
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ),
+                model="orphan-untrusted.gguf",
+                port=8503,
+                log_path=str(
+                    Path(temp) / "untrusted.log"
+                ),
+            )
+
+            try:
+                wrong_token = process.inspect_managed_process_orphan(
+                    record=handle.record,
+                    live_process=handle.process,
+                    owner_token="wrong-owner-token",
+                )
+
+                self.assertFalse(
+                    wrong_token.trusted,
+                    "wrong owner token must remain untrusted",
+                )
+
+                self.assertFalse(
+                    wrong_token.orphaned,
+                    (
+                        "untrusted metadata must not be "
+                        "claimed as a managed orphan"
+                    ),
+                )
+
+                external_record = process.RuntimeProcessRecord(
+                    ownership=process.ProcessOwnership.EXTERNAL,
+                    pid=handle.record.pid,
+                    executable=handle.record.executable,
+                    command=handle.record.command,
+                    model=handle.record.model,
+                    port=handle.record.port,
+                    start_time=handle.record.start_time,
+                    owner_token=handle.record.owner_token,
+                    log_path=handle.record.log_path,
+                )
+
+                external = process.inspect_managed_process_orphan(
+                    record=external_record,
+                    live_process=handle.process,
+                    owner_token=handle.record.owner_token,
+                )
+
+                self.assertFalse(
+                    external.trusted,
+                )
+
+                self.assertFalse(
+                    external.orphaned,
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    (
+                        "untrusted orphan inspection must "
+                        "not signal child"
+                    ),
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
+    def test_orphan_inspection_marks_exited_managed_child(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            handle = process.spawn_managed_process(
+                command=(
+                    sys.executable,
+                    "-c",
+                    "pass",
+                ),
+                model="orphan-exited.gguf",
+                port=8504,
+                log_path=str(
+                    Path(temp) / "exited.log"
+                ),
+            )
+
+            handle.process.wait(
+                timeout=5.0
+            )
+
+            result = process.inspect_managed_process_orphan(
+                record=handle.record,
+                live_process=handle.process,
+                owner_token=handle.record.owner_token,
+            )
+
+            self.assertTrue(
+                result.trusted,
+            )
+
+            self.assertTrue(
+                result.orphaned,
+                "exited managed child must orphan its live record",
+            )
+
+            self.assertFalse(
+                result.running,
+            )
+
+            self.assertTrue(
+                result.pid_matches,
+            )
+
+            self.assertEqual(
+                handle.process.returncode,
+                result.returncode,
+            )
+
+    def test_orphan_inspection_marks_pid_identity_mismatch(self):
+        process = importlib.import_module(
+            "thrilla.runtime.process"
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            handle = process.spawn_managed_process(
+                command=(
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ),
+                model="orphan-pid.gguf",
+                port=8505,
+                log_path=str(
+                    Path(temp) / "pid.log"
+                ),
+            )
+
+            mismatched = process.RuntimeProcessRecord(
+                ownership=process.ProcessOwnership.THRILLA_MANAGED,
+                pid=handle.record.pid + 1,
+                executable=handle.record.executable,
+                command=handle.record.command,
+                model=handle.record.model,
+                port=handle.record.port,
+                start_time=handle.record.start_time,
+                owner_token=handle.record.owner_token,
+                log_path=handle.record.log_path,
+            )
+
+            try:
+                result = process.inspect_managed_process_orphan(
+                    record=mismatched,
+                    live_process=handle.process,
+                    owner_token=mismatched.owner_token,
+                )
+
+                self.assertTrue(
+                    result.trusted,
+                )
+
+                self.assertTrue(
+                    result.orphaned,
+                    "PID identity mismatch must orphan managed record",
+                )
+
+                self.assertFalse(
+                    result.pid_matches,
+                )
+
+                self.assertTrue(
+                    result.running,
+                )
+
+                self.assertIsNone(
+                    handle.process.poll(),
+                    (
+                        "PID mismatch inspection must not "
+                        "signal actual child"
+                    ),
+                )
+            finally:
+                _stop_test_process(
+                    handle.process
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

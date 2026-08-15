@@ -52,6 +52,18 @@ class ShutdownResult:
     returncode: Optional[int]
     detail: str
 
+
+@dataclass(frozen=True)
+class OrphanInspection:
+    """Observed relationship between managed metadata and a live child."""
+
+    trusted: bool
+    orphaned: bool
+    running: bool
+    pid_matches: bool
+    returncode: Optional[int]
+    detail: str
+
 def can_control_process(
     record: RuntimeProcessRecord,
     owner_token: str,
@@ -195,3 +207,63 @@ def shutdown_managed_process(
                 "termination after graceful timeout"
             ),
         )
+
+def inspect_managed_process_orphan(
+    record: RuntimeProcessRecord,
+    live_process: Optional[subprocess.Popen],
+    owner_token: str,
+) -> OrphanInspection:
+    """Inspect whether managed metadata still maps to its live child."""
+    if not can_control_process(
+        record,
+        owner_token,
+    ):
+        return OrphanInspection(
+            trusted=False,
+            orphaned=False,
+            running=False,
+            pid_matches=False,
+            returncode=None,
+            detail="runtime ownership proof rejected",
+        )
+
+    if live_process is None:
+        return OrphanInspection(
+            trusted=True,
+            orphaned=True,
+            running=False,
+            pid_matches=False,
+            returncode=None,
+            detail="managed record has no live process handle",
+        )
+
+    current_returncode = live_process.poll()
+
+    if live_process.pid != record.pid:
+        return OrphanInspection(
+            trusted=True,
+            orphaned=True,
+            running=(current_returncode is None),
+            pid_matches=False,
+            returncode=current_returncode,
+            detail="managed runtime PID identity no longer matches",
+        )
+
+    if current_returncode is not None:
+        return OrphanInspection(
+            trusted=True,
+            orphaned=True,
+            running=False,
+            pid_matches=True,
+            returncode=current_returncode,
+            detail="managed runtime child has exited",
+        )
+
+    return OrphanInspection(
+        trusted=True,
+        orphaned=False,
+        running=True,
+        pid_matches=True,
+        returncode=None,
+        detail="managed runtime identity is active",
+    )
