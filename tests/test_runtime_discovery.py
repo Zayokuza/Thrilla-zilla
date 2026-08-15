@@ -147,6 +147,93 @@ class RuntimeDiscoveryTests(unittest.TestCase):
                 found,
             )
 
+    def test_is_normal_chat_gguf_rejects_vocab_artifact(self):
+        discovery = importlib.import_module(
+            "thrilla.runtime.discovery"
+        )
+
+        classifier = getattr(
+            discovery,
+            "is_normal_chat_gguf",
+            None,
+        )
+
+        self.assertTrue(
+            callable(classifier),
+            "is_normal_chat_gguf must exist",
+        )
+
+        self.assertFalse(
+            classifier(
+                "/models/ggml-vocab-qwen2.gguf"
+            )
+        )
+
+        self.assertTrue(
+            classifier(
+                "/models/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf"
+            )
+        )
+
+    def test_is_normal_chat_gguf_rejects_test_tree_artifact(self):
+        discovery = importlib.import_module(
+            "thrilla.runtime.discovery"
+        )
+
+        self.assertFalse(
+            discovery.is_normal_chat_gguf(
+                "/llama.cpp/tests/models/synthetic.gguf"
+            ),
+            "GGUF inside tests tree must not be normal chat model",
+        )
+
+        self.assertTrue(
+            discovery.is_normal_chat_gguf(
+                "/models/primary/model.gguf"
+            )
+        )
+
+    def test_discover_chat_gguf_files_filters_non_chat_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            models = root / "models"
+            models.mkdir()
+
+            primary = models / "Primary-Q4_K_M.gguf"
+            primary.write_bytes(b"GGUF")
+
+            vocab = models / "ggml-vocab-qwen2.gguf"
+            vocab.write_bytes(b"GGUF")
+
+            tests_dir = root / "tests"
+            tests_dir.mkdir()
+
+            test_artifact = tests_dir / "synthetic.gguf"
+            test_artifact.write_bytes(b"GGUF")
+
+            discovery = importlib.import_module(
+                "thrilla.runtime.discovery"
+            )
+
+            discover = getattr(
+                discovery,
+                "discover_chat_gguf_files",
+                None,
+            )
+
+            self.assertTrue(
+                callable(discover),
+                "discover_chat_gguf_files must exist",
+            )
+
+            found = discover([root])
+
+            self.assertEqual(
+                [str(primary.resolve())],
+                found,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
