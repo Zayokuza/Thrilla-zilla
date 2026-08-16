@@ -16,6 +16,7 @@ from .donors import DonorRegistry, DonorState
 from .history import ConversationHistory
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
+from .runtime.manager import RuntimeBindingError, RuntimeManager
 from .terminal import MenuItem, clear_screen, select_menu, terminal_width
 
 
@@ -64,6 +65,7 @@ class ThrillaApp:
         self.audit = AuditLog(self.config.state_path)
         self.history = ConversationHistory(self.config.state_path)
         self.registry = DonorRegistry(self.config.donor_path)
+        self.runtime_manager = RuntimeManager.from_config(self.config)
         self.model = self._model_client()
         self.message = ""
 
@@ -260,8 +262,15 @@ class ThrillaApp:
                 self.history.append("user", prompt, decision.route.value)
             try:
                 print(self.palette.muted("Thrilla is thinking…"))
-                answer = self.model.chat(messages, decision.route.value)
-            except ModelError as error:
+                binding = self.runtime_manager.ready_binding(
+                    self.config.model_url,
+                    self.config.model_name,
+                )
+                answer = binding.client.chat(
+                    messages,
+                    decision.route.value,
+                )
+            except (ModelError, RuntimeBindingError) as error:
                 self.audit.write(
                     "model_request_failed",
                     route=decision.route.value,
