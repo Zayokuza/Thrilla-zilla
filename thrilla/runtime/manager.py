@@ -10,6 +10,7 @@ from .process import (
     ProcessOwnership,
     RuntimeProcessRecord,
 )
+from .status import RuntimeStatusSnapshot
 
 
 class RuntimeBindingError(RuntimeError):
@@ -76,6 +77,74 @@ class RuntimeManager:
             model,
             self.request_timeout,
             remote_policy=self.remote_policy,
+        )
+
+    def inspect_configured_runtime(
+        self,
+        model_url: str,
+        expected_model: str,
+    ) -> RuntimeStatusSnapshot:
+        """Observe configured runtime without creating a client."""
+        parsed = urlparse(model_url)
+
+        if parsed.scheme != "http" or not parsed.hostname:
+            return RuntimeStatusSnapshot(
+                configured_endpoint=model_url,
+                expected_model=expected_model,
+                ready=False,
+                detail="configured local runtime URL is invalid",
+                error="configured local runtime URL is invalid",
+            )
+
+        try:
+            port = parsed.port
+        except ValueError:
+            return RuntimeStatusSnapshot(
+                configured_endpoint=model_url,
+                expected_model=expected_model,
+                ready=False,
+                detail="configured local runtime port is invalid",
+                host=parsed.hostname,
+                error="configured local runtime port is invalid",
+            )
+
+        if port is None:
+            port = 80
+
+        try:
+            inspection = inspect_existing_server(
+                host=parsed.hostname,
+                port=port,
+                timeout=self.health_timeout,
+                expected_model=expected_model,
+            )
+        except Exception as error:
+            detail = str(error)
+
+            return RuntimeStatusSnapshot(
+                configured_endpoint=model_url,
+                expected_model=expected_model,
+                ready=False,
+                detail=detail,
+                host=parsed.hostname,
+                port=port,
+                error=detail,
+            )
+
+        return RuntimeStatusSnapshot(
+            configured_endpoint=model_url,
+            expected_model=expected_model,
+            ready=inspection.reusable,
+            detail=inspection.detail,
+            host=inspection.host,
+            port=inspection.port,
+            ownership=None,
+            reported_models=inspection.models,
+            error=(
+                ""
+                if inspection.reusable
+                else inspection.detail
+            ),
         )
 
     def ready_binding(
