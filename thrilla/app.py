@@ -24,7 +24,7 @@ MAIN_MENU = (
     MenuItem("1", "Ask Thrilla", "Chat; requests are routed automatically."),
     MenuItem("2", "Donor Library", "Inspect the 100 core and specialist sources."),
     MenuItem("3", "Route Inspector", "See where a request will be sent and why."),
-    MenuItem("4", "Local Model", "Check the local OpenAI-compatible endpoint."),
+    MenuItem("4", "Runtime & Models", "Inspect runtime state and local models."),
     MenuItem("5", "Diagnostics", "Verify Python, Git, donors, storage and model."),
     MenuItem("6", "Conversation History", "Review or clear locally saved chat."),
     MenuItem("7", "Activity Log", "Review metadata-only operational events."),
@@ -42,6 +42,15 @@ DONOR_MENU = (
     MenuItem("6", "Phase-2 Specialists", "Show collected specialist references."),
     MenuItem("0", "Back"),
 )
+
+RUNTIME_MENU = (
+    MenuItem("1", "Runtime Status", "Inspect the configured runtime."),
+    MenuItem("2", "Model Inventory", "Inspect discovered local GGUF models."),
+    MenuItem("3", "Preferred Model", "View or choose the preferred GGUF."),
+    MenuItem("4", "Refresh", "Refresh runtime and model state."),
+    MenuItem("0", "Back"),
+)
+
 
 SETTINGS_MENU = (
     MenuItem("1", "Color Mode", "auto, always or never"),
@@ -142,12 +151,21 @@ class ThrillaApp:
             "1": self.ask,
             "2": self.donor_library,
             "3": self.route_inspector,
-            "4": self.model_screen,
+            "4": self.runtime_models,
             "5": self.diagnostics_screen,
             "6": self.history_screen,
             "7": self.audit_screen,
             "8": self.settings,
             "9": self.about,
+        }
+
+    def runtime_handlers(self) -> Dict[str, Callable[[], None]]:
+        """Return the complete handler map for RUNTIME_MENU."""
+        return {
+            "1": self.runtime_status_screen,
+            "2": self.model_inventory_screen,
+            "3": self.preferred_model_screen,
+            "4": self.refresh_runtime_models,
         }
 
     def donor_handlers(self) -> Dict[str, Callable[[], None]]:
@@ -420,6 +438,81 @@ class ThrillaApp:
         self._status("Why", decision.explanation)
         self.audit.write("route_inspected", route=decision.route.value, prompt_chars=len(request))
         self._pause()
+
+    def runtime_models(self) -> None:
+        handlers = self.runtime_handlers()
+        while True:
+            choice = select_menu(
+                "RUNTIME & MODELS",
+                RUNTIME_MENU,
+                self.palette,
+            )
+            if choice == "0":
+                return
+            handler = handlers.get(choice)
+            if handler is not None:
+                handler()
+
+    def runtime_status_screen(self) -> None:
+        self._header("RUNTIME & MODELS / STATUS")
+        snapshot = self.runtime_manager.inspect_configured_runtime(
+            self.config.model_url,
+            self.config.model_name,
+        )
+
+        self._status("Endpoint", snapshot.configured_endpoint)
+        self._status("Expected model", snapshot.expected_model or "unknown")
+        self._status(
+            "Runtime",
+            "READY" if snapshot.ready else "NOT READY",
+            "pass" if snapshot.ready else "warn",
+        )
+        self._status("Detail", snapshot.detail or "unknown")
+        self._status("Host", snapshot.host or "unknown")
+        self._status(
+            "Port",
+            str(snapshot.port) if snapshot.port is not None else "unknown",
+        )
+
+        ownership = snapshot.ownership
+        ownership_text = (
+            getattr(ownership, "value", str(ownership))
+            if ownership is not None
+            else "unknown"
+        )
+        self._status("Ownership", ownership_text)
+
+        reported = (
+            ", ".join(snapshot.reported_models)
+            if snapshot.reported_models
+            else "unknown"
+        )
+        self._status("Reported model", reported)
+
+        if snapshot.error:
+            self._status("Error", snapshot.error, "warn")
+
+        self._pause()
+
+    def model_inventory_screen(self) -> None:
+        self._header("RUNTIME & MODELS / INVENTORY")
+        print(self.palette.muted(
+            "Model inventory selection is implemented in Step 24."
+        ))
+        self._pause()
+
+    def preferred_model_screen(self) -> None:
+        self._header("RUNTIME & MODELS / PREFERRED MODEL")
+        print(self.palette.muted(
+            "Preferred GGUF selection is implemented in Step 24."
+        ))
+        self._pause()
+
+    def refresh_runtime_models(self) -> None:
+        self.runtime_manager = RuntimeManager.from_config(self.config)
+        self.message = self.palette.success(
+            "Runtime and model state refreshed."
+        )
 
     def model_screen(self) -> None:
         self._header("LOCAL MODEL")
