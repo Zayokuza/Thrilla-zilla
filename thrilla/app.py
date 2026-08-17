@@ -23,15 +23,15 @@ from .terminal import MenuItem, clear_screen, select_menu, terminal_width
 
 
 MAIN_MENU = (
-    MenuItem("1", "Ask Thrilla", "Chat; requests are routed automatically."),
-    MenuItem("2", "Donor Library", "Inspect the 100 core and specialist sources."),
-    MenuItem("3", "Route Inspector", "See where a request will be sent and why."),
-    MenuItem("4", "Runtime & Models", "Inspect runtime state and local models."),
-    MenuItem("5", "Diagnostics", "Verify Python, Git, donors, storage and model."),
-    MenuItem("6", "Conversation History", "Review or clear locally saved chat."),
-    MenuItem("7", "Activity Log", "Review metadata-only operational events."),
-    MenuItem("8", "Settings", "Colors, paths, model and local history."),
-    MenuItem("9", "About", "Version, principles and current capabilities."),
+    MenuItem("1", "Ask Thrilla"),
+    MenuItem("2", "Donor Library"),
+    MenuItem("3", "Route Inspector"),
+    MenuItem("4", "Runtime & Models"),
+    MenuItem("5", "Diagnostics"),
+    MenuItem("6", "Conversation History"),
+    MenuItem("7", "Activity Log"),
+    MenuItem("8", "Settings"),
+    MenuItem("9", "About"),
     MenuItem("0", "Exit"),
 )
 
