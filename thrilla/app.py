@@ -16,6 +16,7 @@ from .donors import DonorRegistry, DonorState
 from .history import ConversationHistory
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
+from .runtime.discovery import build_model_inventory
 from .runtime.manager import RuntimeBindingError, RuntimeManager
 from .terminal import MenuItem, clear_screen, select_menu, terminal_width
 
@@ -494,18 +495,219 @@ class ThrillaApp:
 
         self._pause()
 
+    def _model_search_roots(self):
+        roots = []
+
+        preferred = getattr(
+            self.config,
+            "preferred_model_path",
+            "",
+        )
+        if preferred:
+            roots.append(
+                Path(preferred).expanduser().parent
+            )
+
+        state_root = getattr(
+            self.config,
+            "state_root",
+            "",
+        )
+        if state_root:
+            roots.append(
+                Path(state_root).expanduser() / "models"
+            )
+
+        roots.append(Path.home() / "models")
+
+        unique = []
+        seen = set()
+
+        for root in roots:
+            resolved = str(root)
+            if resolved not in seen:
+                seen.add(resolved)
+                unique.append(resolved)
+
+        return tuple(unique)
+
+    def _model_inventory(self):
+        return build_model_inventory(
+            self._model_search_roots()
+        )
+
     def model_inventory_screen(self) -> None:
         self._header("RUNTIME & MODELS / INVENTORY")
-        print(self.palette.muted(
-            "Model inventory selection is implemented in Step 24."
-        ))
+
+        inventory = self._model_inventory()
+
+        if not inventory:
+            print(self.palette.muted(
+                "No local GGUF models were found in the configured search roots."
+            ))
+            self._pause()
+            return
+
+        for number, candidate in enumerate(
+            inventory,
+            start=1,
+        ):
+            role = getattr(
+                candidate.role,
+                "value",
+                str(candidate.role),
+            )
+
+            size_mb = (
+                candidate.size_bytes / 1048576.0
+            )
+
+            self._status(
+                "{0}. {1}".format(
+                    number,
+                    candidate.filename,
+                ),
+                "{0} | {1} | {2:.1f} MiB".format(
+                    role,
+                    candidate.quantization,
+                    size_mb,
+                ),
+            )
+            self._status(
+                "Path",
+                candidate.path,
+            )
+            self._status(
+                "Readable",
+                "yes"
+                if candidate.readable
+                else "no",
+                "pass"
+                if candidate.readable
+                else "warn",
+            )
+            self._status(
+                "Compatibility",
+                candidate.compatibility
+                or "unknown",
+            )
+
         self._pause()
 
     def preferred_model_screen(self) -> None:
-        self._header("RUNTIME & MODELS / PREFERRED MODEL")
-        print(self.palette.muted(
-            "Preferred GGUF selection is implemented in Step 24."
-        ))
+        self._header(
+            "RUNTIME & MODELS / PREFERRED MODEL"
+        )
+
+        preferred = getattr(
+            self.config,
+            "preferred_model_path",
+            "",
+        )
+
+        if preferred:
+            preferred_path = Path(
+                preferred
+            ).expanduser()
+
+            exists = preferred_path.is_file()
+
+            self._status(
+                "Preferred",
+                str(preferred_path),
+                "pass" if exists else "warn",
+            )
+            self._status(
+                "Preferred file",
+                "available" if exists else "missing",
+                "pass" if exists else "warn",
+            )
+        else:
+            self._status(
+                "Preferred",
+                "not selected",
+            )
+
+        inventory = self._model_inventory()
+
+        for number, candidate in enumerate(
+            inventory,
+            start=1,
+        ):
+            role = getattr(
+                candidate.role,
+                "value",
+                str(candidate.role),
+            )
+            self._status(
+                "{0}. {1}".format(
+                    number,
+                    candidate.filename,
+                ),
+                "{0} | {1}".format(
+                    role,
+                    candidate.quantization,
+                ),
+            )
+
+        choice = self._prompt(
+            "Preferred model number or GGUF path"
+        )
+
+        if not choice:
+            self._pause()
+            return
+
+        selected = None
+
+        if choice.isdigit():
+            index = int(choice) - 1
+
+            if 0 <= index < len(inventory):
+                selected = Path(
+                    inventory[index].path
+                )
+        else:
+            selected = Path(
+                choice
+            ).expanduser()
+
+        if (
+            selected is None
+            or not selected.is_file()
+            or selected.suffix.lower() != ".gguf"
+        ):
+            self._status(
+                "Selection",
+                "missing or invalid GGUF",
+                "warn",
+            )
+            self._pause()
+            return
+
+        selected = selected.resolve()
+
+        self.config.preferred_model_path = str(
+            selected
+        )
+
+        self.config.save()
+
+        self.audit.write(
+            "preferred_model_changed",
+            preferred_model_path=str(selected),
+        )
+
+        self._status(
+            "Preferred",
+            str(selected),
+            "pass",
+        )
+        self._status(
+            "Runtime state",
+            "selection saved; loaded state requires runtime evidence",
+        )
+
         self._pause()
 
     def refresh_runtime_models(self) -> None:

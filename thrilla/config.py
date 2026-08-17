@@ -15,6 +15,7 @@ class Config:
     state_root: str
     model_url: str = "http://127.0.0.1:8080/v1/chat/completions"
     model_name: str = "local-model"
+    preferred_model_path: str = ""
     color_mode: str = "auto"
     request_timeout: float = 90.0
     save_history: bool = True
@@ -100,6 +101,7 @@ class Config:
         config.state_root = str(config.state_root)
         config.model_url = str(config.model_url)
         config.model_name = str(config.model_name)
+        config.preferred_model_path = str(config.preferred_model_path)
         return config
 
     def save(self, path: Optional[Path] = None) -> Path:
