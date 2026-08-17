@@ -15,6 +15,7 @@ from .limits import DEFAULT_LIMITS, LimitMode
 from .diagnostics import Check, platform_name, run_checks
 from .donors import DonorRegistry, DonorState
 from .history import ConversationHistory
+from .identity import CREATOR_NAME
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
 from .runtime.discovery import build_model_inventory
@@ -962,6 +963,9 @@ class ThrillaApp:
 
     def about(self) -> None:
         self._header("ABOUT THRILLA-ZILLA")
+        self._status("Creator", CREATOR_NAME)
+        if self.config.owner_name.strip():
+            self._status("Owner", self.config.owner_name.strip())
         print(self.palette.brand(f"Version {__version__}"))
         print(self.palette.muted("Phone-first • local-first • Android/Termux + Windows"))
         print()
