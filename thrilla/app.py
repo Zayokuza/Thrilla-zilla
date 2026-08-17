@@ -194,8 +194,27 @@ class ThrillaApp:
             "7": self.runtime_policies_screen,
         }
 
+    def ensure_owner_profile(self) -> None:
+        """Enroll the local installation owner once."""
+        if self.config.owner_name.strip():
+            return
+
+        while not self.config.owner_name.strip():
+            try:
+                owner_name = self._input_line("What is your name?").strip()
+            except (EOFError, OSError):
+                return
+
+            if not owner_name:
+                continue
+
+            self.config.owner_name = owner_name
+            self.config.save()
+            self.audit.write("owner_profile_created")
+
     def run(self) -> int:
         self.audit.write("app_started", version=__version__, platform=platform_name())
+        self.ensure_owner_profile()
         handlers = self.main_handlers()
         try:
             while True:
