@@ -30,6 +30,11 @@ from .model import LocalModelClient, ModelError
 from .router import Route, route_request
 from .runtime.discovery import build_model_inventory
 from .runtime.manager import RuntimeBindingError, RuntimeManager
+from .observers import (
+    ClockProvider,
+    RuntimeProvider,
+    SelfProvider,
+)
 from .providers import ProviderRegistry
 from .terminal import MenuItem, clear_screen, select_menu, terminal_width
 
@@ -91,9 +96,34 @@ class ThrillaApp:
         self.history = ConversationHistory(self.config.state_path)
         self.registry = DonorRegistry(self.config.donor_path)
         self.runtime_manager = RuntimeManager.from_config(self.config)
-        self.provider_registry = ProviderRegistry(())
+        self.provider_registry = self._provider_registry()
         self.model = self._model_client()
         self.message = ""
+
+    def _provider_registry(self) -> ProviderRegistry:
+        """Build Thrilla's ordered local observation providers."""
+
+        repo_root = str(
+            Path(__file__).resolve().parent.parent
+        )
+
+        return ProviderRegistry(
+            (
+                ClockProvider(),
+                RuntimeProvider(
+                    inspect_fn=(
+                        self.runtime_manager
+                        .inspect_configured_runtime
+                    ),
+                    model_url=self.config.model_url,
+                    expected_model=self.config.model_name,
+                ),
+                SelfProvider(
+                    repo_root=repo_root,
+                    version=__version__,
+                ),
+            )
+        )
 
     def _model_client(self) -> LocalModelClient:
         timeout = self.config.resolve_limit(
@@ -117,6 +147,7 @@ class ThrillaApp:
             mode = ColorMode.AUTO
         self.palette = Palette(mode)
         self.registry = DonorRegistry(self.config.donor_path)
+        self.provider_registry = self._provider_registry()
         self.model = self._model_client()
 
     def _title(self) -> str:
