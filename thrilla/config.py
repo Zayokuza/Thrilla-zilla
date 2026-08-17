@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
 
+from .equipment import normalized_equipment_state
 from .limits import DEFAULT_LIMITS
 
 
@@ -16,6 +17,10 @@ class Config:
     model_url: str = "http://127.0.0.1:8080/v1/chat/completions"
     model_name: str = "local-model"
     owner_name: str = ""
+    creator_vault_unlocked: bool = False
+    equipment_states: Dict[str, bool] = field(
+        default_factory=lambda: normalized_equipment_state({})
+    )
     preferred_model_path: str = ""
     color_mode: str = "auto"
     request_timeout: float = 90.0
@@ -103,6 +108,11 @@ class Config:
         config.model_url = str(config.model_url)
         config.model_name = str(config.model_name)
         config.owner_name = str(config.owner_name)
+        if not isinstance(config.creator_vault_unlocked, bool):
+            config.creator_vault_unlocked = False
+        config.equipment_states = normalized_equipment_state(
+            config.equipment_states
+        )
         config.preferred_model_path = str(config.preferred_model_path)
         return config
 
