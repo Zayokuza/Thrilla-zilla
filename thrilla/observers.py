@@ -6,6 +6,7 @@ from typing import Callable, Optional
 from .answers import (
     AnswerContext,
     Evidence,
+    KnowledgeGap,
 )
 from .providers import EvidenceProvider
 
@@ -465,6 +466,320 @@ class SelfProvider(EvidenceProvider):
                 "Observed from the local Git repository "
                 "using read-only Git commands and the "
                 "configured Thrilla version."
+            ),
+            content=answer,
+        )
+
+        return AnswerContext(
+            direct_answer=answer,
+            evidence=(evidence,),
+        )
+
+
+class MemoryProvider(EvidenceProvider):
+    """Retrieve relevant durable local conversation history."""
+
+    _TERMS = (
+        "what did i say",
+        "what have i said",
+        "do you remember",
+        "did i tell you",
+        "remember when",
+        "what did we talk",
+        "what have we talked",
+        "what were we talking",
+        "earlier conversation",
+        "previous conversation",
+        "previously discussed",
+        "from earlier",
+    )
+
+    _STOPWORDS = {
+        "a",
+        "about",
+        "an",
+        "and",
+        "are",
+        "before",
+        "did",
+        "do",
+        "earlier",
+        "from",
+        "have",
+        "i",
+        "is",
+        "it",
+        "me",
+        "my",
+        "of",
+        "our",
+        "previous",
+        "previously",
+        "remember",
+        "say",
+        "said",
+        "tell",
+        "that",
+        "the",
+        "this",
+        "to",
+        "talk",
+        "talked",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "you",
+    }
+
+    def __init__(
+        self,
+        records_fn: Callable[..., list],
+        max_records: int = 200,
+        max_matches: int = 6,
+    ) -> None:
+        self._records_fn = records_fn
+        self.max_records = max(
+            1,
+            int(max_records),
+        )
+        self.max_matches = max(
+            1,
+            int(max_matches),
+        )
+
+    def supports(
+        self,
+        prompt: str,
+    ) -> bool:
+        lowered = prompt.lower()
+
+        return any(
+            term in lowered
+            for term in self._TERMS
+        )
+
+    @classmethod
+    def _tokens(
+        cls,
+        value: str,
+    ):
+        import re
+
+        return {
+            token
+            for token in re.findall(
+                r"[a-z0-9]+",
+                value.lower(),
+            )
+            if len(token) > 1
+            and token not in cls._STOPWORDS
+        }
+
+    @staticmethod
+    def _normalized(
+        value: str,
+    ) -> str:
+        return " ".join(
+            value.lower().split()
+        )
+
+    def _candidate_records(
+        self,
+        prompt: str,
+    ):
+        records = list(
+            self._records_fn(
+                limit=self.max_records
+            )
+        )
+
+        # ask() persists the owner's current prompt before
+        # provider resolution. Exclude that final record so
+        # Thrilla never "remembers" the question it is
+        # currently answering as prior history.
+        if records:
+            last = records[-1]
+
+            if (
+                last.get("role") == "user"
+                and self._normalized(
+                    str(
+                        last.get(
+                            "content",
+                            "",
+                        )
+                    )
+                )
+                == self._normalized(prompt)
+            ):
+                records = records[:-1]
+
+        return records
+
+    def collect(
+        self,
+        prompt: str,
+    ) -> AnswerContext:
+        records = self._candidate_records(
+            prompt
+        )
+
+        query_tokens = self._tokens(
+            prompt
+        )
+
+        ranked = []
+
+        for index, record in enumerate(
+            records
+        ):
+            role = record.get("role")
+
+            content = record.get(
+                "content"
+            )
+
+            if (
+                role not in {
+                    "user",
+                    "assistant",
+                }
+                or not isinstance(
+                    content,
+                    str,
+                )
+                or not content.strip()
+            ):
+                continue
+
+            if query_tokens:
+                overlap = (
+                    query_tokens
+                    & self._tokens(content)
+                )
+
+                score = len(overlap)
+
+                if score == 0:
+                    continue
+            else:
+                score = 0
+
+            ranked.append(
+                (
+                    score,
+                    index,
+                    record,
+                )
+            )
+
+        if query_tokens:
+            ranked.sort(
+                key=lambda item: (
+                    item[0],
+                    item[1],
+                ),
+                reverse=True,
+            )
+        else:
+            ranked.sort(
+                key=lambda item: item[1],
+                reverse=True,
+            )
+
+        matches = [
+            item[2]
+            for item in ranked[
+                : self.max_matches
+            ]
+        ]
+
+        if not matches:
+            return AnswerContext(
+                gap=KnowledgeGap(
+                    unknown=(
+                        "matching prior conversation"
+                    ),
+                    missing_evidence=(
+                        "relevant local conversation history",
+                    ),
+                    reason=(
+                        "No matching conversation history "
+                        "was found in Thrilla's local "
+                        "conversation store."
+                    ),
+                    resolution=(
+                        "provide more specific recall terms",
+                        (
+                            "confirm the conversation was "
+                            "saved locally"
+                        ),
+                    ),
+                )
+            )
+
+        lines = [
+            "Relevant local conversation history:"
+        ]
+
+        for number, record in enumerate(
+            matches,
+            start=1,
+        ):
+            role = record.get(
+                "role",
+                "unknown",
+            )
+
+            timestamp = record.get(
+                "timestamp",
+                "unknown time",
+            )
+
+            route = record.get(
+                "route"
+            )
+
+            header = (
+                "{0}. [{1}] {2}".format(
+                    number,
+                    role,
+                    timestamp,
+                )
+            )
+
+            if route:
+                header += (
+                    " route={0}".format(
+                        route
+                    )
+                )
+
+            lines.extend(
+                [
+                    header,
+                    str(
+                        record.get(
+                            "content",
+                            "",
+                        )
+                    ),
+                ]
+            )
+
+        answer = "\n".join(lines)
+
+        evidence = Evidence(
+            source=(
+                "local_conversation_history"
+            ),
+            detail=(
+                "Retrieved from Thrilla's durable local "
+                "conversation history as evidence only. "
+                "The owner's current request remains "
+                "authoritative."
             ),
             content=answer,
         )

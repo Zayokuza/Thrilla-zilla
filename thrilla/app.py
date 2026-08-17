@@ -32,6 +32,7 @@ from .runtime.discovery import build_model_inventory
 from .runtime.manager import RuntimeBindingError, RuntimeManager
 from .observers import (
     ClockProvider,
+    MemoryProvider,
     RuntimeProvider,
     SelfProvider,
 )
@@ -121,6 +122,9 @@ class ThrillaApp:
                 SelfProvider(
                     repo_root=repo_root,
                     version=__version__,
+                ),
+                MemoryProvider(
+                    records_fn=self.history.records,
                 ),
             )
         )

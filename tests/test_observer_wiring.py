@@ -55,6 +55,46 @@ class ObserverWiringTests(unittest.TestCase):
             FakeRuntimeManager()
         )
 
+        def history_records(limit=None):
+            records = [
+                {
+                    "timestamp": (
+                        "2026-08-15T10:00:00+00:00"
+                    ),
+                    "role": "user",
+                    "content": (
+                        "The launch code name is "
+                        "Thunder Road."
+                    ),
+                    "route": "general-chat",
+                },
+                {
+                    "timestamp": (
+                        "2026-08-15T10:01:00+00:00"
+                    ),
+                    "role": "assistant",
+                    "content": (
+                        "Thunder Road is recorded as "
+                        "the launch code name."
+                    ),
+                    "route": "general-chat",
+                },
+            ]
+
+            if limit is None:
+                return list(records)
+
+            bounded = max(0, int(limit))
+
+            if bounded == 0:
+                return []
+
+            return list(records[-bounded:])
+
+        app.history = SimpleNamespace(
+            records=history_records,
+        )
+
         return app
 
     def registry(self):
@@ -181,6 +221,33 @@ class ObserverWiringTests(unittest.TestCase):
         self.assertEqual(
             context.evidence[0].source,
             "repository_state",
+        )
+
+    def test_memory_provider_is_wired(self):
+        app, registry = self.registry()
+        del app
+
+        context = registry.collect(
+            "What did I say about the launch code?"
+        )
+
+        self.assertIsNotNone(
+            context.direct_answer
+        )
+
+        self.assertIn(
+            "Thunder Road",
+            context.direct_answer,
+        )
+
+        self.assertEqual(
+            len(context.evidence),
+            1,
+        )
+
+        self.assertEqual(
+            context.evidence[0].source,
+            "local_conversation_history",
         )
 
     def test_unrelated_prompt_falls_through(self):
