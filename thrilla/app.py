@@ -11,6 +11,7 @@ from .audit import AuditLog
 from .catalog import CORE_DONORS, DonorSpec, phase_one_categories
 from .colors import ColorMode, Palette
 from .config import Config
+from .limits import DEFAULT_LIMITS, LimitMode
 from .diagnostics import Check, platform_name, run_checks
 from .donors import DonorRegistry, DonorState
 from .history import ConversationHistory
@@ -60,6 +61,7 @@ SETTINGS_MENU = (
     MenuItem("4", "Model Name", "Name sent with chat requests"),
     MenuItem("5", "Save Conversation History", "Local JSONL memory"),
     MenuItem("6", "Model Timeout", "Seconds before a request is cancelled"),
+    MenuItem("7", "Runtime Policies", "Universal Limit Control modes and values"),
     MenuItem("0", "Back"),
 )
 
@@ -189,6 +191,7 @@ class ThrillaApp:
             "4": self.setting_model_name,
             "5": self.setting_history,
             "6": self.setting_timeout,
+            "7": self.runtime_policies_screen,
         }
 
     def run(self) -> int:
@@ -787,6 +790,97 @@ class ThrillaApp:
             if choice == "0":
                 return
             handlers[choice]()
+
+    def set_runtime_policy_mode(self, name: str, mode: str) -> None:
+        if name not in DEFAULT_LIMITS.names():
+            raise ValueError("unknown runtime policy: {0}".format(name))
+
+        normalized = LimitMode(mode).value
+        self.config.limit_modes[name] = normalized
+        self.config.save()
+
+        self.audit.write(
+            "runtime_policy_changed",
+            limit_name=name,
+            mode=normalized,
+        )
+
+    def runtime_policies_screen(self) -> None:
+        self._header("SETTINGS / RUNTIME POLICIES")
+
+        self._status(
+            "Global default",
+            self.config.limit_default_mode.upper(),
+        )
+
+        names = DEFAULT_LIMITS.names()
+
+        for number, name in enumerate(names, start=1):
+            mode = self.config.limit_modes.get(
+                name,
+                self.config.limit_default_mode,
+            )
+            configured = self.config.limit_values.get(
+                name,
+                "not set",
+            )
+            decision = self.config.resolve_limit(name)
+
+            effective = (
+                "none"
+                if decision.value is None
+                else str(decision.value)
+            )
+
+            self._status(
+                "{0}. {1}".format(number, name),
+                "{0} | configured={1} | effective={2}".format(
+                    mode.upper(),
+                    configured,
+                    effective,
+                ),
+            )
+
+        choice = self._prompt(
+            "Limit number/name to change, or Enter to go back"
+        )
+
+        if not choice:
+            self._pause()
+            return
+
+        if choice.isdigit():
+            index = int(choice) - 1
+            name = names[index] if 0 <= index < len(names) else ""
+        else:
+            name = choice
+
+        if name not in names:
+            self._status("Policy", "unknown limit", "warn")
+            self._pause()
+            return
+
+        mode = self._prompt(
+            "Mode for {0} (on/auto/off)".format(name)
+        ).lower()
+
+        if mode not in {
+            LimitMode.ON.value,
+            LimitMode.AUTO.value,
+            LimitMode.OFF.value,
+        }:
+            self._status("Mode", "must be on, auto or off", "warn")
+            self._pause()
+            return
+
+        self.set_runtime_policy_mode(name, mode)
+
+        self._status(
+            "Saved",
+            "{0} = {1}".format(name, mode.upper()),
+            "pass",
+        )
+        self._pause()
 
     def _save_setting(self, field: str, old_value: object) -> None:
         path = self.config.save()
