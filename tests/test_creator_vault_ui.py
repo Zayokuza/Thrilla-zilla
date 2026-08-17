@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from thrilla import app as app_module
 from thrilla.app import ThrillaApp
@@ -72,7 +72,11 @@ class CreatorVaultUITests(unittest.TestCase):
         config.save = Mock()
         app.audit.write = Mock()
 
-        app.creator_vault_screen()
+        with patch(
+            "thrilla.app.select_menu",
+            return_value="0",
+        ):
+            app.creator_vault_screen()
 
         self.assertTrue(config.creator_vault_unlocked)
         config.save.assert_called_once_with()
@@ -87,7 +91,11 @@ class CreatorVaultUITests(unittest.TestCase):
         config.save = Mock()
         app.audit.write = Mock()
 
-        app.creator_vault_screen()
+        with patch(
+            "thrilla.app.select_menu",
+            return_value="0",
+        ):
+            app.creator_vault_screen()
 
         audit_text = repr(app.audit.write.call_args_list)
 
@@ -99,10 +107,139 @@ class CreatorVaultUITests(unittest.TestCase):
             side_effect=AssertionError("asked for code again")
         )
 
-        app.creator_vault_screen()
+        with patch(
+            "thrilla.app.select_menu",
+            return_value="0",
+        ):
+            app.creator_vault_screen()
 
         app._input_line.assert_not_called()
         app._header.assert_any_call("CREATOR VAULT: UNLOCKED")
+
+
+class EquipmentToggleTests(unittest.TestCase):
+    def make_app(self, unlocked=True):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+
+        config = Config.defaults()
+        config.state_root = str(Path(temp.name) / "state")
+        config.donor_root = str(Path(temp.name) / "donors")
+        config.owner_name = "Jesse James"
+        config.creator_vault_unlocked = unlocked
+
+        app = ThrillaApp(config)
+        config.save = Mock()
+        app.audit.write = Mock()
+
+        return app, config
+
+    def assert_independent_toggle(self, equipment):
+        app, config = self.make_app(True)
+
+        before = dict(config.equipment_states)
+
+        result = app.toggle_equipment(equipment)
+
+        self.assertTrue(result)
+        self.assertTrue(config.equipment_states[equipment])
+
+        for name, old_state in before.items():
+            if name != equipment:
+                self.assertEqual(
+                    config.equipment_states[name],
+                    old_state,
+                )
+
+        self.assertTrue(config.creator_vault_unlocked)
+
+    def test_locked_vault_cannot_toggle_equipment(self):
+        app, config = self.make_app(False)
+
+        result = app.toggle_equipment("sword")
+
+        self.assertFalse(result)
+        self.assertFalse(config.equipment_states["sword"])
+        config.save.assert_not_called()
+        app.audit.write.assert_not_called()
+
+    def test_sword_toggles_independently(self):
+        self.assert_independent_toggle("sword")
+
+    def test_shield_toggles_independently(self):
+        self.assert_independent_toggle("shield")
+
+    def test_helmet_toggles_independently(self):
+        self.assert_independent_toggle("helmet")
+
+    def test_armor_toggles_independently(self):
+        self.assert_independent_toggle("armor")
+
+    def test_boots_toggle_independently(self):
+        self.assert_independent_toggle("boots")
+
+    def test_turning_equipment_off_never_relocks_vault(self):
+        app, config = self.make_app(True)
+
+        app.toggle_equipment("sword")
+        self.assertTrue(config.equipment_states["sword"])
+
+        result = app.toggle_equipment("sword")
+
+        self.assertFalse(result)
+        self.assertFalse(config.equipment_states["sword"])
+        self.assertTrue(config.creator_vault_unlocked)
+
+    def test_toggle_audit_contains_name_and_state_only(self):
+        app, _ = self.make_app(True)
+
+        app.toggle_equipment("sword")
+
+        app.audit.write.assert_called_once_with(
+            "equipment_toggle_changed",
+            equipment="sword",
+            state=True,
+        )
+
+        self.assertNotIn(
+            "1989",
+            repr(app.audit.write.call_args_list),
+        )
+
+    def test_equipment_menu_displays_all_five_states(self):
+        app, config = self.make_app(True)
+
+        config.equipment_states["sword"] = True
+        config.equipment_states["helmet"] = True
+
+        labels = [
+            item.label
+            for item in app.creator_vault_menu_items()
+        ]
+
+        self.assertIn("Sword - ON", labels)
+        self.assertIn("Shield - OFF", labels)
+        self.assertIn("Helmet - ON", labels)
+        self.assertIn("Armor - OFF", labels)
+        self.assertIn("Boots - OFF", labels)
+
+    def test_unlocked_vault_menu_can_toggle_selected_module(self):
+        app, config = self.make_app(True)
+        app._input_line = Mock(
+            side_effect=AssertionError(
+                "unlocked vault asked for code"
+            )
+        )
+
+        with patch(
+            "thrilla.app.select_menu",
+            side_effect=["1", "0"],
+        ):
+            app.creator_vault_screen()
+
+        self.assertTrue(config.equipment_states["sword"])
+        self.assertFalse(config.equipment_states["shield"])
+        self.assertTrue(config.creator_vault_unlocked)
 
 
 if __name__ == "__main__":

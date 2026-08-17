@@ -964,8 +964,67 @@ class ThrillaApp:
         self.config.request_timeout = timeout
         self._save_setting("request_timeout", old)
 
+    def creator_vault_menu_items(self):
+        """Return the five independent equipment toggles."""
+
+        items = []
+
+        for index, name in enumerate(
+            EQUIPMENT_NAMES,
+            start=1,
+        ):
+            state = self.config.equipment_states.get(
+                name,
+                False,
+            )
+
+            items.append(
+                MenuItem(
+                    str(index),
+                    "{} - {}".format(
+                        name.title(),
+                        "ON" if state else "OFF",
+                    ),
+                )
+            )
+
+        items.append(
+            MenuItem("0", "Back")
+        )
+
+        return tuple(items)
+
+    def toggle_equipment(self, name: str) -> bool:
+        """Toggle one Creator Vault module only."""
+
+        if not self.config.creator_vault_unlocked:
+            return False
+
+        if name not in EQUIPMENT_NAMES:
+            raise ValueError(
+                "unknown Creator Vault equipment: {}".format(
+                    name
+                )
+            )
+
+        new_state = not self.config.equipment_states.get(
+            name,
+            False,
+        )
+
+        self.config.equipment_states[name] = new_state
+        self.config.save()
+
+        self.audit.write(
+            "equipment_toggle_changed",
+            equipment=name,
+            state=new_state,
+        )
+
+        return new_state
+
     def creator_vault_screen(self) -> None:
-        """Unlock and display persistent Creator Vault state."""
+        """Unlock the vault and control persistent equipment."""
 
         if not self.config.creator_vault_unlocked:
             self._header("CREATOR VAULT: LOCKED")
@@ -988,21 +1047,36 @@ class ThrillaApp:
 
             self.config.creator_vault_unlocked = True
             self.config.save()
-            self.audit.write("creator_vault_unlocked")
-
-        self._header("CREATOR VAULT: UNLOCKED")
-
-        for name in EQUIPMENT_NAMES:
-            state = self.config.equipment_states.get(
-                name,
-                False,
-            )
-            self._status(
-                name.title(),
-                "ON" if state else "OFF",
+            self.audit.write(
+                "creator_vault_unlocked"
             )
 
-        self._pause()
+        self._header(
+            "CREATOR VAULT: UNLOCKED"
+        )
+
+        while True:
+            choice = select_menu(
+                "CREATOR VAULT: UNLOCKED",
+                self.creator_vault_menu_items(),
+                self.palette,
+            )
+
+            if choice == "0":
+                return
+
+            if not choice.isdigit():
+                continue
+
+            index = int(choice) - 1
+
+            if not 0 <= index < len(EQUIPMENT_NAMES):
+                continue
+
+            self.toggle_equipment(
+                EQUIPMENT_NAMES[index]
+            )
+
 
     def about(self) -> None:
         self._header("ABOUT THRILLA-ZILLA")
