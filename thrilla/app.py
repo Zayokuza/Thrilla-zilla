@@ -20,6 +20,11 @@ from .diagnostics import Check, platform_name, run_checks
 from .donors import DonorRegistry, DonorState
 from .equipment import EQUIPMENT_NAMES, verify_creator_code
 from .history import ConversationHistory
+from .experts import (
+    EXPERT_COUNT,
+    EXPERT_GROUPS,
+    EXPERTS_PER_GROUP,
+)
 from .identity import CREATOR_NAME
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
@@ -1182,7 +1187,7 @@ class ThrillaApp:
         print()
         paragraphs = (
             "This alpha is the native Thrilla control shell: interactive UI, transparent routing, local model adapter, durable local history, donor inventory, diagnostics and audit metadata.",
-            "The 100 repositories are external study sources—not one giant dependency tree. Any borrowed mechanism must pass license review, isolated tests, integration tests and keep-or-rollback evaluation.",
+            "Thrilla defines exactly {} experts across {} groups of {}. These 100 experts are separate from the 100 donor repositories. The donors remain external read-only study sources. Expert runtime orchestration is not yet implemented; this records the architecture without claiming active expert execution.".format(EXPERT_COUNT, len(EXPERT_GROUPS), EXPERTS_PER_GROUP),
             "Current boundary: autonomous tool execution, web research, repository editing, memory retrieval and self-repair gates are not yet implemented. The UI reports that boundary instead of pretending those actions happened.",
         )
         for paragraph in paragraphs:
