@@ -293,3 +293,183 @@ class RuntimeProvider(EvidenceProvider):
             direct_answer=answer,
             evidence=(evidence,),
         )
+
+
+class SelfProvider(EvidenceProvider):
+    """Observe Thrilla's local repository and identity."""
+
+    _TERMS = (
+        "what version are you",
+        "what version is thrilla",
+        "thrilla version",
+        "what branch are you",
+        "which branch are you",
+        "what branch is thrilla",
+        "what commit are you",
+        "which commit are you",
+        "what commit is thrilla",
+        "repository clean",
+        "repo clean",
+        "repository dirty",
+        "repo dirty",
+        "where is your repository",
+        "where is your repo",
+        "where is thrilla",
+        "what project are you",
+        "current code state",
+        "repository state",
+        "repo state",
+        "git status",
+    )
+
+    def __init__(
+        self,
+        repo_root: str,
+        version: str,
+        run_fn: Optional[
+            Callable[..., str]
+        ] = None,
+    ) -> None:
+        self.repo_root = repo_root
+        self.version = version
+
+        self._run_fn = (
+            run_fn
+            if run_fn is not None
+            else self._run_git
+        )
+
+    def supports(
+        self,
+        prompt: str,
+    ) -> bool:
+        lowered = prompt.lower()
+
+        return any(
+            term in lowered
+            for term in self._TERMS
+        )
+
+    @staticmethod
+    def _run_git(
+        args,
+        cwd: str,
+    ) -> str:
+        import subprocess
+
+        completed = subprocess.run(
+            [
+                "git",
+                *args,
+            ],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        return completed.stdout.strip()
+
+    def collect(
+        self,
+        prompt: str,
+    ) -> AnswerContext:
+        del prompt
+
+        root = self._run_fn(
+            (
+                "rev-parse",
+                "--show-toplevel",
+            ),
+            self.repo_root,
+        ).strip()
+
+        branch = self._run_fn(
+            (
+                "branch",
+                "--show-current",
+            ),
+            self.repo_root,
+        ).strip()
+
+        commit = self._run_fn(
+            (
+                "rev-parse",
+                "HEAD",
+            ),
+            self.repo_root,
+        ).strip()
+
+        message = self._run_fn(
+            (
+                "log",
+                "-1",
+                "--pretty=%s",
+            ),
+            self.repo_root,
+        ).strip()
+
+        status = self._run_fn(
+            (
+                "status",
+                "--porcelain",
+            ),
+            self.repo_root,
+        )
+
+        changed_paths = len(
+            [
+                line
+                for line in status.splitlines()
+                if line.strip()
+            ]
+        )
+
+        clean = (
+            changed_paths == 0
+        )
+
+        if not branch:
+            branch = "(detached HEAD)"
+
+        version = (
+            str(self.version).strip()
+            or "unknown"
+        )
+
+        answer = (
+            "Project: THRILLA-ZILLA\n"
+            "Version: {version}\n"
+            "Repository root: {root}\n"
+            "Branch: {branch}\n"
+            "HEAD: {commit} {message}\n"
+            "Worktree clean: {clean}\n"
+            "Changed paths: {changed_paths}"
+        ).format(
+            version=version,
+            root=root,
+            branch=branch,
+            commit=commit,
+            message=message,
+            clean=(
+                "yes"
+                if clean
+                else "no"
+            ),
+            changed_paths=changed_paths,
+        )
+
+        evidence = Evidence(
+            source="repository_state",
+            detail=(
+                "Observed from the local Git repository "
+                "using read-only Git commands and the "
+                "configured Thrilla version."
+            ),
+            content=answer,
+        )
+
+        return AnswerContext(
+            direct_answer=answer,
+            evidence=(evidence,),
+        )
