@@ -14,6 +14,7 @@ from .config import Config
 from .limits import DEFAULT_LIMITS, LimitMode
 from .diagnostics import Check, platform_name, run_checks
 from .donors import DonorRegistry, DonorState
+from .equipment import EQUIPMENT_NAMES, verify_creator_code
 from .history import ConversationHistory
 from .identity import CREATOR_NAME
 from .model import LocalModelClient, ModelError
@@ -63,6 +64,7 @@ SETTINGS_MENU = (
     MenuItem("5", "Save Conversation History", "Local JSONL memory"),
     MenuItem("6", "Model Timeout", "Seconds before a request is cancelled"),
     MenuItem("7", "Runtime Policies", "Universal Limit Control modes and values"),
+    MenuItem("8", "Creator Vault"),
     MenuItem("0", "Back"),
 )
 
@@ -193,6 +195,7 @@ class ThrillaApp:
             "5": self.setting_history,
             "6": self.setting_timeout,
             "7": self.runtime_policies_screen,
+            "8": self.creator_vault_screen,
         }
 
     def ensure_owner_profile(self) -> None:
@@ -960,6 +963,46 @@ class ThrillaApp:
         old = self.config.request_timeout
         self.config.request_timeout = timeout
         self._save_setting("request_timeout", old)
+
+    def creator_vault_screen(self) -> None:
+        """Unlock and display persistent Creator Vault state."""
+
+        if not self.config.creator_vault_unlocked:
+            self._header("CREATOR VAULT: LOCKED")
+
+            try:
+                code = self._input_line(
+                    "Creator Vault code: "
+                )
+            except EOFError:
+                return
+
+            if not verify_creator_code(code):
+                print(
+                    self.palette.error(
+                        "Creator Vault code was not accepted."
+                    )
+                )
+                self._pause()
+                return
+
+            self.config.creator_vault_unlocked = True
+            self.config.save()
+            self.audit.write("creator_vault_unlocked")
+
+        self._header("CREATOR VAULT: UNLOCKED")
+
+        for name in EQUIPMENT_NAMES:
+            state = self.config.equipment_states.get(
+                name,
+                False,
+            )
+            self._status(
+                name.title(),
+                "ON" if state else "OFF",
+            )
+
+        self._pause()
 
     def about(self) -> None:
         self._header("ABOUT THRILLA-ZILLA")
