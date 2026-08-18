@@ -96,14 +96,96 @@ class LocalModelClient:
         except (OSError, ValueError, urllib.error.URLError) as error:
             return ModelStatus(False, f"Local model unavailable: {error}", self.model)
 
+    @staticmethod
+    def _normalize_messages(
+        messages: List[Dict[str, str]],
+        route: str,
+    ) -> List[Dict[str, str]]:
+        """Build a strict alternating model conversation.
+
+        Thrilla's durable history intentionally preserves failed
+        and incomplete turns. Some local chat templates, including
+        Gemma, reject those records when consecutive user messages
+        or orphan assistant messages reach the inference endpoint.
+
+        Keep durable history unchanged and normalize only the
+        model-facing representation.
+        """
+
+        system_parts = [
+            SYSTEM_PROMPT
+            + f"\nActive route: {route}."
+        ]
+        dialogue: List[Dict[str, str]] = []
+
+        for message in messages:
+            role = message.get("role")
+            content = message.get("content")
+
+            if not isinstance(content, str):
+                continue
+
+            if role == "system":
+                system_parts.append(content)
+                continue
+
+            if role in {"user", "assistant"}:
+                dialogue.append(
+                    {
+                        "role": role,
+                        "content": content,
+                    }
+                )
+
+        current_user = None
+
+        if (
+            dialogue
+            and dialogue[-1]["role"] == "user"
+        ):
+            current_user = dialogue.pop()
+
+        completed: List[Dict[str, str]] = []
+        pending_user = None
+
+        for message in dialogue:
+            if message["role"] == "user":
+                pending_user = message
+                continue
+
+            if (
+                message["role"] == "assistant"
+                and pending_user is not None
+            ):
+                completed.extend(
+                    (
+                        pending_user,
+                        message,
+                    )
+                )
+                pending_user = None
+
+        if current_user is not None:
+            completed.append(current_user)
+
+        return [
+            {
+                "role": "system",
+                "content": "\n\n".join(
+                    system_parts
+                ),
+            },
+            *completed,
+        ]
+
     def chat(self, messages: List[Dict[str, str]], route: str) -> str:
         self._allow_url()
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT + f"\nActive route: {route}."},
-                *messages,
-            ],
+            "messages": self._normalize_messages(
+                messages,
+                route,
+            ),
             "temperature": 0.2,
             "stream": False,
         }
