@@ -25,6 +25,7 @@ from .experts import (
     EXPERT_COUNT,
     EXPERT_GROUPS,
     EXPERTS_PER_GROUP,
+    ExpertOrchestrator,
 )
 from .identity import CREATOR_NAME
 from .model import LocalModelClient, ModelError
@@ -40,6 +41,7 @@ from .observers import (
 )
 from .providers import ProviderRegistry
 from .terminal import MenuItem, clear_screen, select_menu, terminal_width
+from .tools import build_default_tool_executor
 
 
 MAIN_MENU = (
@@ -104,6 +106,8 @@ class ThrillaApp:
             self.runtime_manager,
         )
         self.brain = AgentBrain(max_attempts=2)
+        self.expert_orchestrator = ExpertOrchestrator()
+        self.tool_executor = self._tool_executor()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
         self.message = ""
@@ -136,6 +140,15 @@ class ThrillaApp:
             )
         )
 
+    def _tool_executor(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        return build_default_tool_executor(
+            repo_root=repo_root,
+            state_root=self.config.state_path,
+            donor_root=self.config.donor_path,
+        )
+
     def _model_client(self) -> LocalModelClient:
         timeout = self.config.resolve_limit(
             "model.request_timeout"
@@ -163,6 +176,8 @@ class ThrillaApp:
             self.config,
             self.runtime_manager,
         )
+        self.expert_orchestrator = ExpertOrchestrator()
+        self.tool_executor = self._tool_executor()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
 
@@ -381,6 +396,20 @@ class ThrillaApp:
             previous,
             prompt,
             context.evidence,
+        )
+
+        expert_context = self.expert_orchestrator.context_for(
+            prompt,
+            route,
+            limit=3,
+        )
+
+        messages.insert(
+            len(previous),
+            {
+                "role": "system",
+                "content": expert_context,
+            },
         )
 
         # Keep the supervisor bound to the current manager. Tests and
