@@ -130,7 +130,7 @@ class ExpertInvariantTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "runtime orchestration is not yet implemented",
+            "expert orchestration is active",
             normalized,
         )
 

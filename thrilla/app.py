@@ -15,6 +15,7 @@ from .answers import (
 )
 from .catalog import CORE_DONORS, DonorSpec, phase_one_categories
 from .colors import ColorMode, Palette
+from .coding import AutonomousCodingAgent, CodingPlanError
 from .config import Config
 from .limits import DEFAULT_LIMITS, LimitMode
 from .diagnostics import Check, platform_name, run_checks
@@ -108,6 +109,7 @@ class ThrillaApp:
         self.brain = AgentBrain(max_attempts=2)
         self.expert_orchestrator = ExpertOrchestrator()
         self.tool_executor = self._tool_executor()
+        self.coding_agent = self._coding_agent()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
         self.message = ""
@@ -149,6 +151,24 @@ class ThrillaApp:
             donor_root=self.config.donor_path,
         )
 
+    def _coding_agent(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        return AutonomousCodingAgent(
+            repo_root=repo_root,
+            state_root=self.config.state_path,
+            model_chat=lambda messages, route: (
+                self.runtime_supervisor.chat(
+                    messages,
+                    route,
+                )
+            ),
+            verification_timeout=max(
+                180.0,
+                self.config.request_timeout,
+            ),
+        )
+
     def _model_client(self) -> LocalModelClient:
         timeout = self.config.resolve_limit(
             "model.request_timeout"
@@ -178,6 +198,7 @@ class ThrillaApp:
         )
         self.expert_orchestrator = ExpertOrchestrator()
         self.tool_executor = self._tool_executor()
+        self.coding_agent = self._coding_agent()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
 
@@ -428,6 +449,35 @@ class ThrillaApp:
 
         return result.answer
 
+    def _is_self_repair_request(self, prompt: str) -> bool:
+        normalized = " ".join(prompt.lower().split())
+
+        if any(
+            phrase in normalized
+            for phrase in (
+                "fix itself",
+                "repair itself",
+                "debug itself",
+            )
+        ):
+            return True
+
+        repair_signal = any(
+            word in normalized
+            for word in ("fix", "repair", "debug")
+        )
+        self_signal = any(
+            phrase in normalized
+            for phrase in (
+                "yourself",
+                "your own code",
+                "thrilla itself",
+                "thrilla-zilla itself",
+            )
+        )
+
+        return repair_signal and self_signal
+
     def ask(self) -> None:
         self._header("ASK THRILLA")
         print(self.palette.muted("Cyan = you  •  green = Thrilla  •  /help for commands"))
@@ -457,7 +507,7 @@ class ThrillaApp:
             }:
                 return
             if command == "/help":
-                print(self.palette.accent("/route  /model  /clear  /back"))
+                print(self.palette.accent("/route  /model  /repair <goal>  /clear  /back"))
                 continue
             if command == "/route":
                 print(self.palette.accent("Routing is automatic and shown before every response."))
@@ -471,6 +521,76 @@ class ThrillaApp:
                 cleared = self.history.clear()
                 print(self.palette.success("Conversation history cleared." if cleared else "History is already empty."))
                 self.audit.write("history_cleared", existed=cleared)
+                continue
+
+            if command == "/repair":
+                print(self.palette.accent("Usage: /repair <goal>"))
+                continue
+
+            explicit_repair = command.startswith("/repair ")
+            natural_repair = self._is_self_repair_request(prompt)
+
+            if explicit_repair or natural_repair:
+                goal = (
+                    prompt[len("/repair "):].strip()
+                    if explicit_repair
+                    else prompt
+                )
+
+                if not goal:
+                    print(self.palette.warning("Repair goal is empty."))
+                    continue
+
+                print(
+                    self.palette.muted(
+                        "Thrilla self-repair: inspect → plan → checkpoint → edit → verify → critic."
+                    )
+                )
+
+                try:
+                    outcome = self.coding_agent.run(goal)
+                except (CodingPlanError, ModelError, RuntimeBindingError) as error:
+                    self.audit.write(
+                        "self_repair_failed",
+                        goal_chars=len(goal),
+                        error=type(error).__name__,
+                    )
+                    print(self.palette.error(str(error)))
+                    print(self.palette.warning("No verified repair was claimed."))
+                    continue
+
+                self.audit.write(
+                    "self_repair_completed",
+                    goal_chars=len(goal),
+                    ok=outcome.ok,
+                    rolled_back=outcome.rolled_back,
+                    checkpoint=outcome.checkpoint_id,
+                    edited_files=len(outcome.edited_paths),
+                )
+
+                painter = self.palette.success if outcome.ok else self.palette.warning
+                print(painter(outcome.summary))
+
+                if outcome.edited_paths:
+                    print(
+                        self.palette.muted(
+                            "Files: " + ", ".join(outcome.edited_paths)
+                        )
+                    )
+
+                print(
+                    self.palette.muted(
+                        "Checkpoint: " + outcome.checkpoint_id
+                    )
+                )
+
+                if outcome.rolled_back:
+                    print(
+                        self.palette.warning(
+                            "Verification failed; original files were restored automatically."
+                        )
+                    )
+
                 continue
 
             decision = route_request(prompt)
@@ -1271,8 +1391,8 @@ class ThrillaApp:
         print()
         paragraphs = (
             "This alpha is the native Thrilla control shell: interactive UI, transparent routing, local model adapter, durable local history, donor inventory, diagnostics and audit metadata.",
-            "Thrilla defines exactly {} experts across {} groups of {}. These 100 experts are separate from the 100 donor repositories. The donors remain external read-only study sources. Expert runtime orchestration is not yet implemented; this records the architecture without claiming active expert execution.".format(EXPERT_COUNT, len(EXPERT_GROUPS), EXPERTS_PER_GROUP),
-            "Current boundary: autonomous tool execution, web research, repository editing, memory retrieval and self-repair gates are not yet implemented. The UI reports that boundary instead of pretending those actions happened.",
+            "Thrilla defines exactly {} experts across {} groups of {}. These 100 experts are separate from the 100 donor repositories. The donors remain external read-only study sources. Expert orchestration is active and selects a compact Reason / Action / Critic team for each routed request.".format(EXPERT_COUNT, len(EXPERT_GROUPS), EXPERTS_PER_GROUP),
+            "Current boundary: bounded local inspection tools and checkpointed self-repair are active. Repository repairs use inspected candidate files, model-planned text edits, deterministic verification, critic review and automatic rollback on failure. Web research, durable owner-profile memory and broader workflow autonomy remain later stages.",
         )
         for paragraph in paragraphs:
             print(textwrap.fill(paragraph, width=min(terminal_width(), 68)) + "\n")
