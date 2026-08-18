@@ -8,6 +8,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from . import __version__
 from .audit import AuditLog
+from .brain import AgentBrain, BrainError
 from .answers import (
     KnowledgeGap,
     build_reasoning_messages,
@@ -30,6 +31,7 @@ from .model import LocalModelClient, ModelError
 from .router import Route, route_request
 from .runtime.discovery import build_model_inventory
 from .runtime.manager import RuntimeBindingError, RuntimeManager
+from .runtime.supervisor import RuntimeSupervisor
 from .observers import (
     ClockProvider,
     MemoryProvider,
@@ -97,6 +99,11 @@ class ThrillaApp:
         self.history = ConversationHistory(self.config.state_path)
         self.registry = DonorRegistry(self.config.donor_path)
         self.runtime_manager = RuntimeManager.from_config(self.config)
+        self.runtime_supervisor = RuntimeSupervisor(
+            self.config,
+            self.runtime_manager,
+        )
+        self.brain = AgentBrain(max_attempts=2)
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
         self.message = ""
@@ -151,6 +158,11 @@ class ThrillaApp:
             mode = ColorMode.AUTO
         self.palette = Palette(mode)
         self.registry = DonorRegistry(self.config.donor_path)
+        self.runtime_manager = RuntimeManager.from_config(self.config)
+        self.runtime_supervisor = RuntimeSupervisor(
+            self.config,
+            self.runtime_manager,
+        )
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
 
@@ -371,17 +383,21 @@ class ThrillaApp:
             context.evidence,
         )
 
-        binding = (
-            self.runtime_manager.ready_binding(
-                self.config.model_url,
-                self.config.model_name,
-            )
+        # Keep the supervisor bound to the current manager. Tests and
+        # adapters may replace runtime_manager after app construction;
+        # retaining the constructor-time manager would bypass that
+        # replacement and can accidentally reach a live runtime.
+        self.runtime_supervisor.manager = self.runtime_manager
+
+        result = self.brain.run_answer(
+            prompt,
+            lambda: self.runtime_supervisor.chat(
+                messages,
+                route,
+            ),
         )
 
-        return binding.client.chat(
-            messages,
-            route,
-        )
+        return result.answer
 
     def ask(self) -> None:
         self._header("ASK THRILLA")
@@ -449,7 +465,11 @@ class ThrillaApp:
                     previous,
                     decision.route.value,
                 )
-            except (ModelError, RuntimeBindingError) as error:
+            except (
+                BrainError,
+                ModelError,
+                RuntimeBindingError,
+            ) as error:
                 self.audit.write(
                     "model_request_failed",
                     route=decision.route.value,

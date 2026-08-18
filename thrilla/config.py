@@ -22,6 +22,11 @@ class Config:
         default_factory=lambda: normalized_equipment_state({})
     )
     preferred_model_path: str = ""
+    runtime_autostart: bool = True
+    runtime_context: int = 2048
+    runtime_threads: int = 4
+    runtime_start_timeout: float = 60.0
+    runtime_stop_timeout: float = 5.0
     color_mode: str = "auto"
     request_timeout: float = 90.0
     save_history: bool = True
@@ -114,6 +119,40 @@ class Config:
             config.equipment_states
         )
         config.preferred_model_path = str(config.preferred_model_path)
+
+        if not isinstance(config.runtime_autostart, bool):
+            config.runtime_autostart = str(
+                config.runtime_autostart
+            ).lower() in {"1", "true", "yes", "on"}
+
+        try:
+            config.runtime_context = int(config.runtime_context)
+        except (TypeError, ValueError):
+            config.runtime_context = 2048
+        config.runtime_context = min(131072, max(256, config.runtime_context))
+
+        try:
+            config.runtime_threads = int(config.runtime_threads)
+        except (TypeError, ValueError):
+            config.runtime_threads = 4
+        config.runtime_threads = min(64, max(1, config.runtime_threads))
+
+        try:
+            config.runtime_start_timeout = float(config.runtime_start_timeout)
+        except (TypeError, ValueError):
+            config.runtime_start_timeout = 60.0
+        config.runtime_start_timeout = min(
+            600.0, max(1.0, config.runtime_start_timeout)
+        )
+
+        try:
+            config.runtime_stop_timeout = float(config.runtime_stop_timeout)
+        except (TypeError, ValueError):
+            config.runtime_stop_timeout = 5.0
+        config.runtime_stop_timeout = min(
+            60.0, max(0.1, config.runtime_stop_timeout)
+        )
+
         return config
 
     def save(self, path: Optional[Path] = None) -> Path:
