@@ -18,6 +18,7 @@ class Step21AskRuntimeTests(unittest.TestCase):
             )
 
             app = ThrillaApp(config)
+            self.addCleanup(app.close)
 
             self.assertTrue(
                 hasattr(app, "runtime_manager"),
@@ -77,6 +78,7 @@ class Step21AskBindingTests(unittest.TestCase):
                 save_history=False,
             )
             app = ThrillaApp(config)
+            self.addCleanup(app.close)
 
             direct_client = Mock()
             direct_client.chat.return_value = "wrong client"
@@ -121,6 +123,7 @@ class Step21ReadinessFailureTests(unittest.TestCase):
                 save_history=False,
             )
             app = ThrillaApp(config)
+            self.addCleanup(app.close)
 
             direct_client = Mock()
             app.model = direct_client

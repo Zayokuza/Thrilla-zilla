@@ -70,7 +70,7 @@ class RuntimeSupervisor:
             "-t",
             str(self.config.runtime_threads),
             "--cache-ram",
-            "0",
+            "256",
         ]
 
     def ensure_ready(self) -> RuntimeClientBinding:

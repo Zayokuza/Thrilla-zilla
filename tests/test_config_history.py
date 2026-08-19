@@ -29,7 +29,7 @@ class ConfigHistoryTests(unittest.TestCase):
             with patch.dict(os.environ, {"THRILLA_HOME": wanted}):
                 loaded = Config.load(path)
             self.assertEqual(wanted, loaded.state_root)
-            self.assertEqual(90.0, loaded.request_timeout)
+            self.assertEqual(180.0, loaded.request_timeout)
 
     def test_history_context_is_bounded_and_clear_preserves_copy(self):
         with tempfile.TemporaryDirectory() as temporary:

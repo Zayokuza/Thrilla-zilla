@@ -28,7 +28,7 @@ class Config:
     runtime_start_timeout: float = 60.0
     runtime_stop_timeout: float = 5.0
     color_mode: str = "auto"
-    request_timeout: float = 90.0
+    request_timeout: float = 180.0
     save_history: bool = True
     history_turns: int = 12
     limit_default_mode: str = "auto"
@@ -99,7 +99,7 @@ class Config:
         try:
             config.request_timeout = float(config.request_timeout)
         except (TypeError, ValueError):
-            config.request_timeout = 90.0
+            config.request_timeout = 180.0
         config.request_timeout = min(3600.0, max(1.0, config.request_timeout))
         try:
             config.history_turns = int(config.history_turns)

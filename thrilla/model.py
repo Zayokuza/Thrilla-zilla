@@ -165,6 +165,47 @@ class LocalModelClient:
                 )
                 pending_user = None
 
+        # Keep durable history intact, but bound only the model-facing
+        # context. On this phone Gemma processes prompt tokens far more
+        # slowly than it generates a tiny reply; sending 20+ historical
+        # messages can consume the entire request timeout before generation.
+        #
+        # General chat gets up to the two most recent complete pairs, within
+        # a tight character budget. Work routes keep a larger bounded window.
+        if route == "general-chat":
+            pair_limit = 2
+            history_char_budget = 600
+        else:
+            pair_limit = 4
+            history_char_budget = 4000
+
+        pairs = [
+            completed[index:index + 2]
+            for index in range(0, len(completed), 2)
+            if len(completed[index:index + 2]) == 2
+        ]
+
+        selected_pairs = []
+        used_chars = 0
+
+        for pair in reversed(pairs):
+            pair_chars = sum(
+                len(message["content"])
+                for message in pair
+            )
+            if pair_chars > history_char_budget - used_chars:
+                break
+            selected_pairs.append(pair)
+            used_chars += pair_chars
+            if len(selected_pairs) >= pair_limit:
+                break
+
+        completed = [
+            message
+            for pair in reversed(selected_pairs)
+            for message in pair
+        ]
+
         if current_user is not None:
             completed.append(current_user)
 
