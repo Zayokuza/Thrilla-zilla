@@ -139,6 +139,14 @@ _REQUIRED_LIMIT_NAMES = (
     "model.request_timeout",
     "memory.history_turns",
     "network.remote_model",
+    "network.public_read",
+    "network.write_actions",
+    "network.fetch_timeout",
+    "network.fetch_bytes",
+    "network.redirects",
+    "network.research_workers",
+    "network.cache_entries",
+    "network.cache_age_seconds",
     "donor.git_timeout",
 )
 
@@ -147,6 +155,14 @@ _DEFAULT_VALUES = {
     "model.request_timeout": 90.0,
     "memory.history_turns": 12,
     "network.remote_model": False,
+    "network.public_read": True,
+    "network.write_actions": False,
+    "network.fetch_timeout": 15.0,
+    "network.fetch_bytes": 2_000_000,
+    "network.redirects": 5,
+    "network.research_workers": 3,
+    "network.cache_entries": 256,
+    "network.cache_age_seconds": 3600,
     "donor.git_timeout": 4.0,
 }
 

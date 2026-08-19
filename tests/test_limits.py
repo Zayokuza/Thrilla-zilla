@@ -65,6 +65,14 @@ class LimitControlBootstrapTests(unittest.TestCase):
             "model.request_timeout",
             "memory.history_turns",
             "network.remote_model",
+            "network.public_read",
+            "network.write_actions",
+            "network.fetch_timeout",
+            "network.fetch_bytes",
+            "network.redirects",
+            "network.research_workers",
+            "network.cache_entries",
+            "network.cache_age_seconds",
             "donor.git_timeout",
         }
 
