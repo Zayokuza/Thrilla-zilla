@@ -30,6 +30,21 @@ from .experts import (
 )
 from .identity import CREATOR_NAME
 from .knowledge import OwnerMemoryProvider, SelfKnowledgeProvider
+from .jobs import JobManager, JobState
+from .live_ui import (
+    ChatLine,
+    ControlAction,
+    LiveWorkRenderer,
+    control_action_for,
+)
+from .network_auth import AuthorizationStore, NetworkPolicy
+from .research import (
+    DuckDuckGoHTMLSearch,
+    HTTPFetcher,
+    ResearchCache,
+    ResearchEngine,
+)
+from .workflows import WorkflowServices
 from .memory import HybridMemory, MemoryError, MemoryRejected
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
@@ -43,7 +58,13 @@ from .observers import (
     SelfProvider,
 )
 from .providers import ProviderRegistry
-from .terminal import MenuItem, clear_screen, select_menu, terminal_width
+from .terminal import (
+    MenuItem,
+    clear_screen,
+    read_key_timeout,
+    select_menu,
+    terminal_width,
+)
 from .tools import build_default_tool_executor
 
 
@@ -116,6 +137,7 @@ class ThrillaApp:
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
         self.message = ""
+        self._stage5_services()
 
     def _provider_registry(self) -> ProviderRegistry:
         """Build Thrilla's ordered local observation providers."""
@@ -244,6 +266,315 @@ class ThrillaApp:
         self.coding_agent = self._coding_agent()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
+        self._stage5_services()
+
+    def _stage5_services(self) -> None:
+        """Build or refresh Stage-5 live work services."""
+
+        if not hasattr(self, "job_manager"):
+            self.job_manager = JobManager(
+                self.config.state_path,
+                max_workers=3,
+            )
+
+        public_read = self.config.resolve_limit(
+            "network.public_read"
+        ).value
+        write_actions = self.config.resolve_limit(
+            "network.write_actions"
+        ).value
+        self.network_authorizations = AuthorizationStore(
+            self.config.state_path
+        )
+        self.network_policy = NetworkPolicy(
+            public_read_enabled=bool(public_read),
+            write_enabled=bool(write_actions),
+            authorization_store=self.network_authorizations,
+        )
+
+        def resolved(name, fallback):
+            value = self.config.resolve_limit(name).value
+            return fallback if value is None else value
+
+        fetcher = HTTPFetcher(
+            policy=self.network_policy,
+            timeout=float(resolved("network.fetch_timeout", 15.0)),
+            max_bytes=int(resolved("network.fetch_bytes", 2_000_000)),
+            redirects=int(resolved("network.redirects", 5)),
+        )
+        cache = ResearchCache(
+            self.config.state_path,
+            max_entries=int(resolved("network.cache_entries", 256)),
+            max_age_seconds=float(
+                resolved("network.cache_age_seconds", 3600)
+            ),
+        )
+        self.research_engine = ResearchEngine(
+            search=DuckDuckGoHTMLSearch(fetcher),
+            fetcher=fetcher,
+            cache=cache,
+            max_workers=int(resolved("network.research_workers", 3)),
+        )
+        audit = getattr(getattr(self, "audit", None), "write", None)
+        self.workflows = WorkflowServices(
+            jobs=self.job_manager,
+            answer_fn=self._resolve_ask_answer,
+            research_engine=self.research_engine,
+            coding_agent=self.coding_agent,
+            audit_sink=audit,
+        )
+        self.live_renderer = LiveWorkRenderer()
+
+        if not hasattr(self, "_active_job_ids"):
+            recovered = self.job_manager.recoverable()
+            self._active_job_ids = [item.job_id for item in recovered]
+            self._last_job_id = (
+                self._active_job_ids[-1]
+                if self._active_job_ids
+                else None
+            )
+
+    def close(self) -> None:
+        """Release workers and durable local resources."""
+
+        manager = getattr(self, "job_manager", None)
+        shutdown = getattr(manager, "shutdown", None)
+        if callable(shutdown):
+            shutdown(False)
+
+        memory = getattr(self, "memory", None)
+        store = getattr(memory, "store", None)
+        close_store = getattr(store, "close", None)
+        if callable(close_store):
+            close_store()
+
+    def _track_job(self, job_id: str) -> None:
+        if not hasattr(self, "_active_job_ids"):
+            self._active_job_ids = []
+        if job_id not in self._active_job_ids:
+            self._active_job_ids.append(job_id)
+        self._last_job_id = job_id
+
+    def _direct_provider_answer(self, prompt: str):
+        context = self.provider_registry.collect(prompt)
+        if context.direct_answer is not None:
+            return context.direct_answer
+        if context.gap is not None:
+            return self._format_knowledge_gap(context.gap)
+        return None
+
+    def _handle_control(
+        self,
+        job_id: str,
+        action: ControlAction,
+    ) -> str:
+        if action is ControlAction.HOLD:
+            self.job_manager.hold(job_id)
+            return "hold"
+        if action is ControlAction.CONTINUE_FULL:
+            self.job_manager.resume(job_id)
+            return "continue"
+        if action is ControlAction.COMMUNICATE:
+            return "communicate"
+        return "back"
+
+    @staticmethod
+    def _format_research_result(result) -> str:
+        lines = [
+            "Research evidence: {0}".format(
+                len(getattr(result, "evidence", ()))
+            )
+        ]
+        for index, item in enumerate(
+            getattr(result, "evidence", ()), 1
+        ):
+            lines.append(
+                "{0}. {1}".format(index, item.title or item.url)
+            )
+            lines.append("   " + item.url)
+            lines.append(
+                "   " + " ".join(item.text.split())[:360]
+            )
+        errors = getattr(result, "errors", ())
+        if errors:
+            lines.append("Fetch issues: {0}".format(len(errors)))
+        return "\n".join(lines)
+
+    def _render_job_result(self, snapshot) -> str:
+        if snapshot.state is JobState.COMPLETED:
+            if snapshot.kind == "research":
+                return self._format_research_result(snapshot.result)
+            if snapshot.kind == "repair":
+                return getattr(
+                    snapshot.result, "summary", str(snapshot.result)
+                )
+            return str(snapshot.result)
+        if snapshot.state is JobState.FAILED:
+            return "Job failed: " + snapshot.error
+        if snapshot.state is JobState.CANCELLED:
+            return "Job cancelled."
+        return "Job {0} is still {1} in the background.".format(
+            snapshot.job_id[:8], snapshot.state.value
+        )
+
+    def _communicate_during_job(
+        self,
+        job_id: str,
+        conversation,
+    ) -> None:
+        while True:
+            snapshot = self.job_manager.snapshot(job_id)
+            if snapshot.state in {
+                JobState.COMPLETED,
+                JobState.FAILED,
+                JobState.CANCELLED,
+            }:
+                return
+            try:
+                prompt = self._input_line("\nyou(work)> ").strip()
+            except EOFError:
+                return
+            if not prompt:
+                continue
+            command = prompt.lower()
+            if command in {"/back", "back", "0"}:
+                return
+            if command == "1":
+                self.job_manager.hold(job_id)
+                continue
+            if command == "3":
+                self.job_manager.resume(job_id)
+                continue
+
+            conversation.append(ChatLine("you", prompt))
+            direct = self._direct_provider_answer(prompt)
+            if direct is not None:
+                conversation.append(ChatLine("thrilla", direct))
+                print(
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(direct)
+                )
+                continue
+
+            if snapshot.kind == "research":
+                decision = route_request(prompt)
+                history_turns = self.config.resolve_limit(
+                    "memory.history_turns"
+                ).value
+                previous = (
+                    self.history.messages(history_turns)
+                    if self.config.save_history
+                    else []
+                )
+                try:
+                    answer = self._resolve_ask_answer(
+                        prompt, previous, decision.route.value
+                    )
+                except (
+                    BrainError,
+                    ModelError,
+                    RuntimeBindingError,
+                ):
+                    answer = None
+                if answer:
+                    conversation.append(ChatLine("thrilla", answer))
+                    print(
+                        "\n"
+                        + self.palette.answer("thrilla> ")
+                        + self.palette.answer(answer)
+                    )
+                    continue
+
+            self.job_manager.directive(job_id, prompt)
+            message = (
+                "Directive queued into the active job at "
+                "its next safe checkpoint."
+            )
+            conversation.append(ChatLine("thrilla", message))
+            print(
+                "\n"
+                + self.palette.answer("thrilla> ")
+                + self.palette.answer(message)
+            )
+
+    def _active_work_screen(
+        self,
+        job_id: str,
+        conversation=None,
+    ):
+        conversation = list(conversation or ())
+        interactive = bool(
+            getattr(sys.stdin, "isatty", lambda: False)()
+            and getattr(sys.stdout, "isatty", lambda: False)()
+        )
+
+        while True:
+            snapshot = self.job_manager.snapshot(job_id)
+
+            if interactive:
+                clear_screen()
+                print(
+                    self.live_renderer.render(
+                        conversation,
+                        snapshot,
+                        width=terminal_width(),
+                    )
+                )
+
+            if snapshot.state in {
+                JobState.COMPLETED,
+                JobState.FAILED,
+                JobState.CANCELLED,
+            }:
+                return snapshot
+
+            if not interactive:
+                return snapshot
+
+            try:
+                key = read_key_timeout(0.25)
+            except KeyboardInterrupt:
+                return snapshot
+
+            if key is None:
+                continue
+            if key in {"q", "Q", "ESC", "EOF"}:
+                action = ControlAction.BACK
+            else:
+                try:
+                    action = control_action_for(key)
+                except ValueError:
+                    continue
+
+            result = self._handle_control(job_id, action)
+            if result == "communicate":
+                self._communicate_during_job(
+                    job_id, conversation
+                )
+            elif result == "back":
+                return self.job_manager.snapshot(job_id)
+
+    def _print_jobs(self) -> None:
+        ids = list(getattr(self, "_active_job_ids", ()))
+        if not ids:
+            print(self.palette.muted("No tracked Stage-5 jobs."))
+            return
+        for job_id in ids[-12:]:
+            try:
+                snapshot = self.job_manager.snapshot(job_id)
+            except KeyError:
+                continue
+            print(
+                self.palette.muted(
+                    "{0}  {1:<10}  {2}  {3}".format(
+                        job_id[:8],
+                        snapshot.kind,
+                        snapshot.state.value,
+                        snapshot.goal[:42],
+                    )
+                )
+            )
 
     def _title(self) -> str:
         ready, total = self.registry.progress(1)
@@ -379,6 +710,7 @@ class ThrillaApp:
                     self._pause()
         finally:
             self.audit.write("app_stopped")
+            self.close()
         print(self.palette.muted("Thrilla stopped cleanly."))
         return 0
 
@@ -539,8 +871,17 @@ class ThrillaApp:
 
     def ask(self) -> None:
         self._header("ASK THRILLA")
-        print(self.palette.muted("Cyan = you  •  green = Thrilla  •  /help for commands"))
-        print(self.palette.muted("Requests route to chat, coding, search, files/data, device or system."))
+        print(
+            self.palette.muted(
+                "Cyan = you  •  green = Thrilla  •  /help for commands"
+            )
+        )
+        print(
+            self.palette.muted(
+                "Conversation stays usable while Stage-5 jobs run."
+            )
+        )
+
         while True:
             try:
                 prompt = self._input_line("\nyou> ").strip()
@@ -548,38 +889,91 @@ class ThrillaApp:
                 return
             if not prompt:
                 continue
-            command = prompt.lower().strip()
 
+            command = prompt.lower().strip()
             if command in {
-                "/back",
-                "/exit",
-                "/quit",
-                "back",
-                "exit",
-                "quit",
-                "0",
-                "go back",
-                "start over",
-                "main menu",
-                "menu",
-                "home",
+                "/back", "/exit", "/quit", "back", "exit", "quit",
+                "0", "go back", "start over", "main menu", "menu", "home",
             }:
                 return
+
             if command == "/help":
-                print(self.palette.accent("/route  /model  /remember <fact>  /memories  /forget <query>  /correct <query> => <value>  /repair <goal>  /clear  /back"))
+                print(
+                    self.palette.accent(
+                        "/research <query>  /jobs  /work  /route  /model  "
+                        "/remember <fact>  /memories  /forget <query>  "
+                        "/correct <query> => <value>  /repair <goal>  "
+                        "/clear  /back"
+                    )
+                )
                 continue
+
+            if command == "/jobs":
+                self._print_jobs()
+                continue
+
+            if command == "/work":
+                job_id = getattr(self, "_last_job_id", None)
+                if not job_id:
+                    print(self.palette.muted("No active/recent job."))
+                    continue
+                snapshot = self._active_work_screen(job_id)
+                print(
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(
+                        self._render_job_result(snapshot)
+                    )
+                )
+                continue
+
             if command == "/route":
-                print(self.palette.accent("Routing is automatic and shown before every response."))
+                print(
+                    self.palette.accent(
+                        "Routing is automatic and shown before every response."
+                    )
+                )
                 continue
+
             if command == "/model":
                 status = self.model.health()
-                level = "pass" if status.online else "warn"
-                self._status("Model", status.detail, level)
+                self._status(
+                    "Model",
+                    status.detail,
+                    "pass" if status.online else "warn",
+                )
                 continue
+
             if command == "/clear":
                 cleared = self.history.clear()
-                print(self.palette.success("Conversation history cleared." if cleared else "History is already empty."))
+                print(
+                    self.palette.success(
+                        "Conversation history cleared."
+                        if cleared
+                        else "History is already empty."
+                    )
+                )
                 self.audit.write("history_cleared", existed=cleared)
+                continue
+
+            if command == "/research":
+                print(self.palette.accent("Usage: /research <query>"))
+                continue
+
+            if command.startswith("/research "):
+                query = prompt[len("/research "):].strip()
+                job_id = self.workflows.run_research_job(query)
+                self._track_job(job_id)
+                snapshot = self._active_work_screen(
+                    job_id, [ChatLine("you", query)]
+                )
+                print(
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(
+                        self._render_job_result(snapshot)
+                    )
+                )
                 continue
 
             if command == "/repair":
@@ -588,68 +982,27 @@ class ThrillaApp:
 
             explicit_repair = command.startswith("/repair ")
             natural_repair = self._is_self_repair_request(prompt)
-
             if explicit_repair or natural_repair:
                 goal = (
                     prompt[len("/repair "):].strip()
                     if explicit_repair
                     else prompt
                 )
-
                 if not goal:
                     print(self.palette.warning("Repair goal is empty."))
                     continue
-
+                job_id = self.workflows.run_repair_job(goal)
+                self._track_job(job_id)
+                snapshot = self._active_work_screen(
+                    job_id, [ChatLine("you", goal)]
+                )
                 print(
-                    self.palette.muted(
-                        "Thrilla self-repair: inspect → plan → checkpoint → edit → verify → critic."
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(
+                        self._render_job_result(snapshot)
                     )
                 )
-
-                try:
-                    outcome = self.coding_agent.run(goal)
-                except (CodingPlanError, ModelError, RuntimeBindingError) as error:
-                    self.audit.write(
-                        "self_repair_failed",
-                        goal_chars=len(goal),
-                        error=type(error).__name__,
-                    )
-                    print(self.palette.error(str(error)))
-                    print(self.palette.warning("No verified repair was claimed."))
-                    continue
-
-                self.audit.write(
-                    "self_repair_completed",
-                    goal_chars=len(goal),
-                    ok=outcome.ok,
-                    rolled_back=outcome.rolled_back,
-                    checkpoint=outcome.checkpoint_id,
-                    edited_files=len(outcome.edited_paths),
-                )
-
-                painter = self.palette.success if outcome.ok else self.palette.warning
-                print(painter(outcome.summary))
-
-                if outcome.edited_paths:
-                    print(
-                        self.palette.muted(
-                            "Files: " + ", ".join(outcome.edited_paths)
-                        )
-                    )
-
-                print(
-                    self.palette.muted(
-                        "Checkpoint: " + outcome.checkpoint_id
-                    )
-                )
-
-                if outcome.rolled_back:
-                    print(
-                        self.palette.warning(
-                            "Verification failed; original files were restored automatically."
-                        )
-                    )
-
                 continue
 
             if command == "/memories" or command.startswith("/memories "):
@@ -658,15 +1011,10 @@ class ThrillaApp:
                     if command.startswith("/memories ")
                     else ""
                 )
-                print(
-                    self.palette.answer(
-                        self.memory.list_text(query)
-                    )
-                )
+                print(self.palette.answer(self.memory.list_text(query)))
                 continue
 
             explicit_memory = None
-
             if command.startswith("/remember "):
                 explicit_memory = prompt[len("/remember "):].strip()
             elif command.startswith("remember that "):
@@ -674,13 +1022,10 @@ class ThrillaApp:
 
             if explicit_memory is not None:
                 try:
-                    fact = self.memory.remember_explicit(
-                        explicit_memory
-                    )
+                    fact = self.memory.remember_explicit(explicit_memory)
                 except MemoryRejected as error:
                     print(self.palette.warning(str(error)))
                     continue
-
                 self._sync_owner_name((fact,))
                 self.audit.write(
                     "durable_memory_saved",
@@ -701,12 +1046,13 @@ class ThrillaApp:
                 query = prompt[len("/forget "):].strip()
                 count = self.memory.forget(query)
                 self.audit.write(
-                    "durable_memory_forgotten",
-                    matches=count,
+                    "durable_memory_forgotten", matches=count
                 )
                 print(
                     self.palette.success(
-                        "Forgot {0} matching durable memory item(s).".format(count)
+                        "Forgot {0} matching durable memory item(s).".format(
+                            count
+                        )
                     )
                 )
                 continue
@@ -720,25 +1066,18 @@ class ThrillaApp:
                         )
                     )
                     continue
-
                 query, replacement = (
                     part.strip()
                     for part in payload.split("=>", 1)
                 )
-
                 try:
-                    fact = self.memory.correct(
-                        query,
-                        replacement,
-                    )
+                    fact = self.memory.correct(query, replacement)
                 except (MemoryError, MemoryRejected) as error:
                     print(self.palette.warning(str(error)))
                     continue
-
                 self._sync_owner_name((fact,))
                 self.audit.write(
-                    "durable_memory_corrected",
-                    fact_id=fact.fact_id,
+                    "durable_memory_corrected", fact_id=fact.fact_id
                 )
                 print(
                     self.palette.success(
@@ -754,14 +1093,20 @@ class ThrillaApp:
             if promoted:
                 self._sync_owner_name(promoted)
                 self.audit.write(
-                    "durable_memory_promoted",
-                    count=len(promoted),
+                    "durable_memory_promoted", count=len(promoted)
                 )
 
             decision = route_request(prompt)
-            print(self.palette.muted(
-                f"route: {decision.route.value}  •  confidence: {decision.confidence:.0%}  •  {decision.explanation}"
-            ))
+            print(
+                self.palette.muted(
+                    "route: {0}  •  confidence: {1:.0%}  •  {2}".format(
+                        decision.route.value,
+                        decision.confidence,
+                        decision.explanation,
+                    )
+                )
+            )
+
             history_turns = self.config.resolve_limit(
                 "memory.history_turns"
             ).value
@@ -771,39 +1116,55 @@ class ThrillaApp:
                 else []
             )
             if self.config.save_history:
-                self.history.append("user", prompt, decision.route.value)
-            try:
-                print(self.palette.muted("Thrilla is thinking…"))
-                answer = self._resolve_ask_answer(
-                    prompt,
-                    previous,
-                    decision.route.value,
+                self.history.append(
+                    "user", prompt, decision.route.value
                 )
-            except (
-                BrainError,
-                ModelError,
-                RuntimeBindingError,
-            ) as error:
-                self.audit.write(
-                    "model_request_failed",
-                    route=decision.route.value,
-                    prompt_chars=len(prompt),
-                    error=type(error).__name__,
+
+            direct = self._direct_provider_answer(prompt)
+            if direct is not None:
+                if self.config.save_history:
+                    self.history.append(
+                        "assistant", direct, decision.route.value
+                    )
+                print(
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(direct)
                 )
-                print(self.palette.error(str(error)))
-                print(self.palette.warning(
-                    "Start llama-server or change Settings → Model URL. The request was not claimed as completed."
-                ))
                 continue
-            if self.config.save_history:
-                self.history.append("assistant", answer, decision.route.value)
-            self.audit.write(
-                "model_request_completed",
-                route=decision.route.value,
-                prompt_chars=len(prompt),
-                answer_chars=len(answer),
+
+            if decision.route is Route.DEEP_SEARCH:
+                job_id = self.workflows.run_research_job(prompt)
+            else:
+                job_id = self.workflows.run_answer_job(
+                    prompt, previous, decision.route.value
+                )
+
+            self._track_job(job_id)
+            snapshot = self._active_work_screen(
+                job_id, [ChatLine("you", prompt)]
             )
-            print("\n" + self.palette.answer("thrilla> ") + self.palette.answer(answer))
+            rendered = self._render_job_result(snapshot)
+
+            if snapshot.state is JobState.COMPLETED:
+                if snapshot.kind == "answer":
+                    assistant_text = str(snapshot.result)
+                elif snapshot.kind == "research":
+                    assistant_text = rendered
+                else:
+                    assistant_text = ""
+                if assistant_text and self.config.save_history:
+                    self.history.append(
+                        "assistant",
+                        assistant_text,
+                        decision.route.value,
+                    )
+
+            print(
+                "\n"
+                + self.palette.answer("thrilla> ")
+                + self.palette.answer(rendered)
+            )
 
     def donor_library(self) -> None:
         handlers = self.donor_handlers()

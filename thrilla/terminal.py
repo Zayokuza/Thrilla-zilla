@@ -92,6 +92,71 @@ def read_key(stream: IO[str] = sys.stdin) -> str:
     return _read_windows_key(stream) if os.name == "nt" else _read_posix_key(stream)
 
 
+def _read_posix_key_timeout(timeout: float, stream: IO[str]) -> Optional[str]:
+    import termios
+    import tty
+
+    file_descriptor = stream.fileno()
+    previous = termios.tcgetattr(file_descriptor)
+    try:
+        tty.setraw(file_descriptor, when=termios.TCSANOW)
+        ready = select.select(
+            [file_descriptor], [], [], max(0.0, float(timeout))
+        )[0]
+        if not ready:
+            return None
+        raw = os.read(file_descriptor, 1)
+        if not raw:
+            return "EOF"
+        key = raw.decode("utf-8", "ignore")
+        if key == "\x1b":
+            sequence = key
+            while select.select([file_descriptor], [], [], 0.025)[0]:
+                sequence += os.read(
+                    file_descriptor, 1
+                ).decode("utf-8", "ignore")
+            return {
+                "\x1b[A": "UP",
+                "\x1bOA": "UP",
+                "\x1b[B": "DOWN",
+                "\x1bOB": "DOWN",
+            }.get(sequence, "ESC")
+        if key in {"\r", "\n"}:
+            return "ENTER"
+        if key == "\x03":
+            raise KeyboardInterrupt
+        return key
+    finally:
+        termios.tcsetattr(
+            file_descriptor,
+            termios.TCSADRAIN,
+            previous,
+        )
+
+
+def read_key_timeout(
+    timeout: float = 0.25,
+    stream: IO[str] = sys.stdin,
+) -> Optional[str]:
+    """Read one key without blocking longer than timeout."""
+
+    if not getattr(stream, "isatty", lambda: False)():
+        return None
+
+    if os.name != "nt":
+        return _read_posix_key_timeout(timeout, stream)
+
+    import msvcrt
+    import time
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while time.monotonic() < deadline:
+        if msvcrt.kbhit():
+            return _read_windows_key(stream)
+        time.sleep(0.01)
+    return None
+
+
 def _wrapped_lines(
     text: object,
     width: int,
