@@ -60,7 +60,7 @@ class KnowledgeProviderTests(unittest.TestCase):
             context.direct_answer,
         )
         self.assertIn(
-            "Roadmap stage: 4/6",
+            "Roadmap stage: 5/6",
             context.direct_answer,
         )
         self.assertIn(

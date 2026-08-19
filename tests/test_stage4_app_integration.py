@@ -66,7 +66,7 @@ class Stage4AppIntegrationTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "Roadmap stage: 4/6",
+            "Roadmap stage: 5/6",
             answer,
         )
 

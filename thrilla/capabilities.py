@@ -3,7 +3,7 @@
 from .identity import CREATOR_NAME
 
 
-STAGE = 4
+STAGE = 5
 
 ACTIVE_CAPABILITIES = (
     "supervised local llama-server runtime with one managed recovery attempt",
@@ -12,11 +12,13 @@ ACTIVE_CAPABILITIES = (
     "checkpointed repository self-repair with verification and rollback",
     "durable hybrid owner/project memory with provenance and correction",
     "direct local owner-memory and self-knowledge answers without model inference",
+    "persistent bounded background jobs with checkpoint recovery",
+    "read-only web research with persistent cache, evidence deduplication, and safe-download classification",
+    "split conversation / active-work interface with owner Hold, Communicate, Continue full, and Back controls",
+    "live owner communication while eligible background work continues",
 )
 
 FUTURE_CAPABILITIES = (
-    "web research and evidence-backed browsing",
-    "broader multi-step workflows and self-recovery",
     "release-candidate acceptance across target platforms",
 )
 

@@ -30,11 +30,38 @@ class WorkflowServices:
     def run_answer_job(self, prompt: str, previous, route: str) -> str:
         def task(ctx: JobContext):
             ctx.checkpoint("answer.reason", next_action="answer.verify")
-            answer = self.answer_fn(prompt, previous, route)
+            try:
+                answer = self.answer_fn(prompt, previous, route)
+            except Exception as error:
+                self._audit(
+                    "model_request_failed",
+                    route=route,
+                    prompt_chars=len(prompt),
+                    error=type(error).__name__,
+                )
+                raise
+
             if not str(answer).strip():
-                raise WorkflowError("answer workflow returned an empty answer")
+                error = WorkflowError(
+                    "answer workflow returned an empty answer"
+                )
+                self._audit(
+                    "model_request_failed",
+                    route=route,
+                    prompt_chars=len(prompt),
+                    error=type(error).__name__,
+                )
+                raise error
+
             ctx.checkpoint("answer.verify", next_action="finish")
-            return str(answer)
+            answer = str(answer)
+            self._audit(
+                "model_request_completed",
+                route=route,
+                prompt_chars=len(prompt),
+                answer_chars=len(answer),
+            )
+            return answer
 
         job_id = self.jobs.submit("answer", prompt, task)
         self._audit("answer_job_created", job_id=job_id, route=route)

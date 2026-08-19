@@ -2,6 +2,7 @@
 
 import textwrap
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
@@ -315,13 +316,15 @@ class ThrillaApp:
             cache=cache,
             max_workers=int(resolved("network.research_workers", 3)),
         )
-        audit = getattr(getattr(self, "audit", None), "write", None)
         self.workflows = WorkflowServices(
             jobs=self.job_manager,
             answer_fn=self._resolve_ask_answer,
             research_engine=self.research_engine,
             coding_agent=self.coding_agent,
-            audit_sink=audit,
+            audit_sink=lambda event, **fields: self.audit.write(
+                event,
+                **fields,
+            ),
         )
         self.live_renderer = LiveWorkRenderer()
 
@@ -530,6 +533,26 @@ class ThrillaApp:
                 return snapshot
 
             if not interactive:
+                timeout_value = self.config.resolve_limit(
+                    "model.request_timeout"
+                ).value
+                timeout_value = (
+                    90.0
+                    if timeout_value is None
+                    else max(1.0, float(timeout_value))
+                )
+                deadline = time.monotonic() + timeout_value
+                while (
+                    snapshot.state
+                    not in {
+                        JobState.COMPLETED,
+                        JobState.FAILED,
+                        JobState.CANCELLED,
+                    }
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.01)
+                    snapshot = self.job_manager.snapshot(job_id)
                 return snapshot
 
             try:
@@ -1918,7 +1941,7 @@ class ThrillaApp:
         paragraphs = (
             "This alpha is the native Thrilla control shell: interactive UI, transparent routing, local model adapter, durable local history, donor inventory, diagnostics and audit metadata.",
             "Thrilla defines exactly {} experts across {} groups of {}. These 100 experts are separate from the 100 donor repositories. The donors remain external read-only study sources. Expert orchestration is active and selects a compact Reason / Action / Critic team for each routed request.".format(EXPERT_COUNT, len(EXPERT_GROUPS), EXPERTS_PER_GROUP),
-            "Current boundary: bounded local tools, checkpointed self-repair with automatic rollback on failure, and durable hybrid owner/project memory are active. Memory keeps provenance, confidence and supersession history; explicit corrections and forgetting are supported, secret-like credentials are excluded, and owner/self-knowledge fast paths answer locally without model inference. Web research and broader workflow autonomy remain later stages.",
+            "Current boundary: bounded local tools, checkpointed self-repair with automatic rollback on failure, durable hybrid owner/project memory, persistent background jobs, read-only web research with cache/evidence, and the split live work interface are active. Hold, Communicate, Continue full, and Back control long-running work while the owner stays in conversation. Stage 6 is release-candidate acceptance; v1.0.0 still requires explicit owner authorization.",
         )
         for paragraph in paragraphs:
             print(textwrap.fill(paragraph, width=min(terminal_width(), 68)) + "\n")
