@@ -337,6 +337,9 @@ class ThrillaApp:
                 else None
             )
 
+        if not hasattr(self, "_notified_job_ids"):
+            self._notified_job_ids = set()
+
     def close(self) -> None:
         """Release workers and durable local resources."""
 
@@ -598,6 +601,91 @@ class ThrillaApp:
                     )
                 )
             )
+
+    def _background_job_started(
+        self,
+        job_id: str,
+        label: str,
+    ) -> None:
+        # Track long work without forcing the control view.
+        self._track_job(job_id)
+        print(
+            self.palette.muted(
+                "{0} started in the background [{1}]. "
+                "Thrilla will continue full automatically. "
+                "Use /work only if you want Hold / Communicate / "
+                "Continue / Back controls.".format(
+                    label,
+                    job_id[:8],
+                )
+            )
+        )
+
+    def _surface_completed_jobs(self) -> None:
+        # Surface each terminal background result once in conversation.
+        if not hasattr(self, "_notified_job_ids"):
+            self._notified_job_ids = set()
+
+        for job_id in tuple(
+            getattr(self, "_active_job_ids", ())
+        ):
+            if job_id in self._notified_job_ids:
+                continue
+
+            try:
+                snapshot = self.job_manager.snapshot(job_id)
+            except KeyError:
+                self._notified_job_ids.add(job_id)
+                continue
+
+            if snapshot.state not in {
+                JobState.COMPLETED,
+                JobState.FAILED,
+                JobState.CANCELLED,
+            }:
+                continue
+
+            rendered = self._render_job_result(snapshot)
+            print(
+                "\n"
+                + self.palette.answer("thrilla(work)> ")
+                + self.palette.answer(rendered)
+            )
+
+            if (
+                snapshot.state is JobState.COMPLETED
+                and rendered
+                and self.config.save_history
+            ):
+                self.history.append(
+                    "assistant",
+                    rendered,
+                    "background-{0}".format(snapshot.kind),
+                )
+
+            self._notified_job_ids.add(job_id)
+
+    def _active_model_bound_job(self):
+        # Avoid competing local-model generations while repair owns it.
+        for job_id in reversed(
+            tuple(getattr(self, "_active_job_ids", ()))
+        ):
+            try:
+                snapshot = self.job_manager.snapshot(job_id)
+            except KeyError:
+                continue
+
+            if (
+                snapshot.kind in {"answer", "repair"}
+                and snapshot.state
+                not in {
+                    JobState.COMPLETED,
+                    JobState.FAILED,
+                    JobState.CANCELLED,
+                }
+            ):
+                return snapshot
+        return None
 
     def _title(self) -> str:
         ready, total = self.registry.progress(1)
@@ -901,11 +989,12 @@ class ThrillaApp:
         )
         print(
             self.palette.muted(
-                "Conversation stays usable while Stage-5 jobs run."
+                "Long work continues automatically. /work opens optional controls."
             )
         )
 
         while True:
+            self._surface_completed_jobs()
             try:
                 prompt = self._input_line("\nyou> ").strip()
             except EOFError:
@@ -986,16 +1075,9 @@ class ThrillaApp:
             if command.startswith("/research "):
                 query = prompt[len("/research "):].strip()
                 job_id = self.workflows.run_research_job(query)
-                self._track_job(job_id)
-                snapshot = self._active_work_screen(
-                    job_id, [ChatLine("you", query)]
-                )
-                print(
-                    "\n"
-                    + self.palette.answer("thrilla> ")
-                    + self.palette.answer(
-                        self._render_job_result(snapshot)
-                    )
+                self._background_job_started(
+                    job_id,
+                    "Research",
                 )
                 continue
 
@@ -1015,16 +1097,9 @@ class ThrillaApp:
                     print(self.palette.warning("Repair goal is empty."))
                     continue
                 job_id = self.workflows.run_repair_job(goal)
-                self._track_job(job_id)
-                snapshot = self._active_work_screen(
-                    job_id, [ChatLine("you", goal)]
-                )
-                print(
-                    "\n"
-                    + self.palette.answer("thrilla> ")
-                    + self.palette.answer(
-                        self._render_job_result(snapshot)
-                    )
+                self._background_job_started(
+                    job_id,
+                    "Repair",
                 )
                 continue
 
@@ -1158,35 +1233,83 @@ class ThrillaApp:
 
             if decision.route is Route.DEEP_SEARCH:
                 job_id = self.workflows.run_research_job(prompt)
-            else:
-                job_id = self.workflows.run_answer_job(
-                    prompt, previous, decision.route.value
+                self._background_job_started(
+                    job_id,
+                    "Deep research",
                 )
+                continue
 
-            self._track_job(job_id)
-            snapshot = self._active_work_screen(
-                job_id, [ChatLine("you", prompt)]
-            )
-            rendered = self._render_job_result(snapshot)
-
-            if snapshot.state is JobState.COMPLETED:
-                if snapshot.kind == "answer":
-                    assistant_text = str(snapshot.result)
-                elif snapshot.kind == "research":
-                    assistant_text = rendered
-                else:
-                    assistant_text = ""
-                if assistant_text and self.config.save_history:
+            model_bound = self._active_model_bound_job()
+            if model_bound is not None:
+                self.job_manager.directive(
+                    model_bound.job_id,
+                    prompt,
+                )
+                queued = (
+                    "Your message was queued into active {0} work "
+                    "[{1}] at its next safe checkpoint. "
+                    "That work is still continuing full. "
+                    "Use /work only if you want to intervene."
+                ).format(
+                    model_bound.kind,
+                    model_bound.job_id[:8],
+                )
+                if self.config.save_history:
                     self.history.append(
                         "assistant",
-                        assistant_text,
+                        queued,
                         decision.route.value,
                     )
+                print(
+                    "\n"
+                    + self.palette.answer("thrilla> ")
+                    + self.palette.answer(queued)
+                )
+                continue
+
+            try:
+                answer = self._resolve_ask_answer(
+                    prompt,
+                    previous,
+                    decision.route.value,
+                )
+            except (
+                BrainError,
+                ModelError,
+                RuntimeBindingError,
+            ) as error:
+                self.audit.write(
+                    "model_request_failed",
+                    route=decision.route.value,
+                    prompt_chars=len(prompt),
+                    error=type(error).__name__,
+                )
+                print(
+                    "\n"
+                    + self.palette.warning(
+                        "Model request failed: {0}".format(error)
+                    )
+                )
+                continue
+
+            self.audit.write(
+                "model_request_completed",
+                route=decision.route.value,
+                prompt_chars=len(prompt),
+                answer_chars=len(answer),
+            )
+
+            if self.config.save_history:
+                self.history.append(
+                    "assistant",
+                    answer,
+                    decision.route.value,
+                )
 
             print(
                 "\n"
                 + self.palette.answer("thrilla> ")
-                + self.palette.answer(rendered)
+                + self.palette.answer(answer)
             )
 
     def donor_library(self) -> None:
