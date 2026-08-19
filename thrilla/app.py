@@ -29,6 +29,8 @@ from .experts import (
     ExpertOrchestrator,
 )
 from .identity import CREATOR_NAME
+from .knowledge import OwnerMemoryProvider, SelfKnowledgeProvider
+from .memory import HybridMemory, MemoryError, MemoryRejected
 from .model import LocalModelClient, ModelError
 from .router import Route, route_request
 from .runtime.discovery import build_model_inventory
@@ -100,6 +102,7 @@ class ThrillaApp:
         self.palette = Palette(mode)
         self.audit = AuditLog(self.config.state_path)
         self.history = ConversationHistory(self.config.state_path)
+        self.memory = HybridMemory(self.config.state_path)
         self.registry = DonorRegistry(self.config.donor_path)
         self.runtime_manager = RuntimeManager.from_config(self.config)
         self.runtime_supervisor = RuntimeSupervisor(
@@ -121,17 +124,53 @@ class ThrillaApp:
             Path(__file__).resolve().parent.parent
         )
 
-        return ProviderRegistry(
-            (
-                ClockProvider(),
-                RuntimeProvider(
-                    inspect_fn=(
-                        self.runtime_manager
-                        .inspect_configured_runtime
-                    ),
-                    model_url=self.config.model_url,
-                    expected_model=self.config.model_name,
+        memory = getattr(
+            self,
+            "memory",
+            None,
+        )
+
+        def owner_name() -> str:
+            configured = str(
+                getattr(
+                    self.config,
+                    "owner_name",
+                    "",
+                )
+            ).strip()
+
+            if memory is None:
+                return configured
+
+            return memory.owner_name(
+                configured
+            )
+
+        providers = [
+            ClockProvider(),
+            RuntimeProvider(
+                inspect_fn=(
+                    self.runtime_manager
+                    .inspect_configured_runtime
                 ),
+                model_url=self.config.model_url,
+                expected_model=self.config.model_name,
+            ),
+            SelfKnowledgeProvider(
+                owner_name_fn=owner_name,
+            ),
+        ]
+
+        if memory is not None:
+            providers.append(
+                OwnerMemoryProvider(
+                    memory=memory,
+                    owner_name_fn=owner_name,
+                )
+            )
+
+        providers.extend(
+            (
                 SelfProvider(
                     repo_root=repo_root,
                     version=__version__,
@@ -140,6 +179,10 @@ class ThrillaApp:
                     records_fn=self.history.records,
                 ),
             )
+        )
+
+        return ProviderRegistry(
+            providers
         )
 
     def _tool_executor(self):
@@ -449,6 +492,22 @@ class ThrillaApp:
 
         return result.answer
 
+    def _sync_owner_name(self, facts) -> None:
+        for fact in facts:
+            if (
+                fact.subject == "owner"
+                and fact.predicate == "name"
+                and fact.value.strip()
+                and fact.value.strip() != self.config.owner_name.strip()
+            ):
+                self.config.owner_name = fact.value.strip()
+                self.config.save()
+                self.audit.write(
+                    "owner_identity_updated",
+                    source=fact.source,
+                )
+                return
+
     def _is_self_repair_request(self, prompt: str) -> bool:
         normalized = " ".join(prompt.lower().split())
 
@@ -507,7 +566,7 @@ class ThrillaApp:
             }:
                 return
             if command == "/help":
-                print(self.palette.accent("/route  /model  /repair <goal>  /clear  /back"))
+                print(self.palette.accent("/route  /model  /remember <fact>  /memories  /forget <query>  /correct <query> => <value>  /repair <goal>  /clear  /back"))
                 continue
             if command == "/route":
                 print(self.palette.accent("Routing is automatic and shown before every response."))
@@ -592,6 +651,112 @@ class ThrillaApp:
                     )
 
                 continue
+
+            if command == "/memories" or command.startswith("/memories "):
+                query = (
+                    prompt[len("/memories "):].strip()
+                    if command.startswith("/memories ")
+                    else ""
+                )
+                print(
+                    self.palette.answer(
+                        self.memory.list_text(query)
+                    )
+                )
+                continue
+
+            explicit_memory = None
+
+            if command.startswith("/remember "):
+                explicit_memory = prompt[len("/remember "):].strip()
+            elif command.startswith("remember that "):
+                explicit_memory = prompt[len("remember that "):].strip()
+
+            if explicit_memory is not None:
+                try:
+                    fact = self.memory.remember_explicit(
+                        explicit_memory
+                    )
+                except MemoryRejected as error:
+                    print(self.palette.warning(str(error)))
+                    continue
+
+                self._sync_owner_name((fact,))
+                self.audit.write(
+                    "durable_memory_saved",
+                    fact_id=fact.fact_id,
+                    source=fact.source,
+                )
+                print(
+                    self.palette.success(
+                        "Remembered: {0} = {1}".format(
+                            fact.predicate.replace("_", " "),
+                            fact.value,
+                        )
+                    )
+                )
+                continue
+
+            if command.startswith("/forget "):
+                query = prompt[len("/forget "):].strip()
+                count = self.memory.forget(query)
+                self.audit.write(
+                    "durable_memory_forgotten",
+                    matches=count,
+                )
+                print(
+                    self.palette.success(
+                        "Forgot {0} matching durable memory item(s).".format(count)
+                    )
+                )
+                continue
+
+            if command.startswith("/correct "):
+                payload = prompt[len("/correct "):].strip()
+                if "=>" not in payload:
+                    print(
+                        self.palette.warning(
+                            "Usage: /correct <query> => <new value or fact>"
+                        )
+                    )
+                    continue
+
+                query, replacement = (
+                    part.strip()
+                    for part in payload.split("=>", 1)
+                )
+
+                try:
+                    fact = self.memory.correct(
+                        query,
+                        replacement,
+                    )
+                except (MemoryError, MemoryRejected) as error:
+                    print(self.palette.warning(str(error)))
+                    continue
+
+                self._sync_owner_name((fact,))
+                self.audit.write(
+                    "durable_memory_corrected",
+                    fact_id=fact.fact_id,
+                )
+                print(
+                    self.palette.success(
+                        "Corrected: {0} = {1}".format(
+                            fact.predicate.replace("_", " "),
+                            fact.value,
+                        )
+                    )
+                )
+                continue
+
+            promoted = self.memory.observe(prompt)
+            if promoted:
+                self._sync_owner_name(promoted)
+                self.audit.write(
+                    "durable_memory_promoted",
+                    count=len(promoted),
+                )
 
             decision = route_request(prompt)
             print(self.palette.muted(
@@ -1392,7 +1557,7 @@ class ThrillaApp:
         paragraphs = (
             "This alpha is the native Thrilla control shell: interactive UI, transparent routing, local model adapter, durable local history, donor inventory, diagnostics and audit metadata.",
             "Thrilla defines exactly {} experts across {} groups of {}. These 100 experts are separate from the 100 donor repositories. The donors remain external read-only study sources. Expert orchestration is active and selects a compact Reason / Action / Critic team for each routed request.".format(EXPERT_COUNT, len(EXPERT_GROUPS), EXPERTS_PER_GROUP),
-            "Current boundary: bounded local inspection tools and checkpointed self-repair are active. Repository repairs use inspected candidate files, model-planned text edits, deterministic verification, critic review and automatic rollback on failure. Web research, durable owner-profile memory and broader workflow autonomy remain later stages.",
+            "Current boundary: bounded local tools, checkpointed self-repair with automatic rollback on failure, and durable hybrid owner/project memory are active. Memory keeps provenance, confidence and supersession history; explicit corrections and forgetting are supported, secret-like credentials are excluded, and owner/self-knowledge fast paths answer locally without model inference. Web research and broader workflow autonomy remain later stages.",
         )
         for paragraph in paragraphs:
             print(textwrap.fill(paragraph, width=min(terminal_width(), 68)) + "\n")
