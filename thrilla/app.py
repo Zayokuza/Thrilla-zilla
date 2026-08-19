@@ -3,6 +3,7 @@
 import textwrap
 import sys
 import time
+import weakref
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
@@ -125,6 +126,10 @@ class ThrillaApp:
         self.audit = AuditLog(self.config.state_path)
         self.history = ConversationHistory(self.config.state_path)
         self.memory = HybridMemory(self.config.state_path)
+        self._memory_finalizer = weakref.finalize(
+            self,
+            self.memory.store.close,
+        )
         self.registry = DonorRegistry(self.config.donor_path)
         self.runtime_manager = RuntimeManager.from_config(self.config)
         self.runtime_supervisor = RuntimeSupervisor(
@@ -348,11 +353,23 @@ class ThrillaApp:
         if callable(shutdown):
             shutdown(False)
 
-        memory = getattr(self, "memory", None)
-        store = getattr(memory, "store", None)
-        close_store = getattr(store, "close", None)
-        if callable(close_store):
-            close_store()
+        memory_finalizer = getattr(
+            self,
+            "_memory_finalizer",
+            None,
+        )
+
+        if (
+            memory_finalizer is not None
+            and getattr(memory_finalizer, "alive", False)
+        ):
+            memory_finalizer()
+        else:
+            memory = getattr(self, "memory", None)
+            store = getattr(memory, "store", None)
+            close_store = getattr(store, "close", None)
+            if callable(close_store):
+                close_store()
 
     def _track_job(self, job_id: str) -> None:
         if not hasattr(self, "_active_job_ids"):

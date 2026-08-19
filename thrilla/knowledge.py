@@ -76,6 +76,21 @@ class SelfKnowledgeProvider(EvidenceProvider):
         "what can you do",
         "what are your capabilities",
         "what do you know about yourself",
+        "what is and isnt functioning",
+        "what is and isn't functioning",
+        "what is and is not functioning",
+        "what is functioning and what isnt",
+        "what is functioning and what isn't",
+        "what is and isnt working",
+        "what is and isn't working",
+        "what is and is not working",
+        "what parts of you are working",
+        "what parts of thrilla are working",
+        "what is implemented in thrilla",
+        "what isn't implemented in thrilla",
+        "what isnt implemented in thrilla",
+        "which capabilities are active",
+        "which capabilities are not active",
     )
 
     def __init__(

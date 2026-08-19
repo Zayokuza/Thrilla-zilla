@@ -116,6 +116,16 @@ class LocalModelClient:
             SYSTEM_PROMPT
             + f"\nActive route: {route}."
         ]
+
+        if route == "general-chat":
+            system_parts.append(
+                "Casual conversation style: respond naturally, directly, and "
+                "without ceremony. For a simple greeting or small-talk message, "
+                "answer in one short sentence unless the user asks for more. "
+                "Do not recite safety policies, capabilities, identity boilerplate, "
+                "or operating principles unless the user specifically asks about them."
+            )
+
         dialogue: List[Dict[str, str]] = []
 
         for message in messages:
@@ -219,6 +229,16 @@ class LocalModelClient:
             *completed,
         ]
 
+    @staticmethod
+    def _max_tokens_for_route(route: str) -> int:
+        if route == "general-chat":
+            return 192
+        if route in {"coding", "deep-search"}:
+            return 768
+        if route in {"files", "data", "device", "system"}:
+            return 512
+        return 384
+
     def chat(self, messages: List[Dict[str, str]], route: str) -> str:
         self._allow_url()
         payload = {
@@ -228,6 +248,7 @@ class LocalModelClient:
                 route,
             ),
             "temperature": 0.2,
+            "max_tokens": self._max_tokens_for_route(route),
             "stream": False,
         }
         request = urllib.request.Request(
