@@ -33,7 +33,18 @@ release-candidate tuning and acceptance.
   - autonomous tasks run through persistent background jobs
   - `/auto <goal>` command surface
   - active autonomous model work participates in Thrilla's model-contention guard
-- **7D — Critic, replanning, budgets and recovery: PENDING**
+- **7D — Critic, replanning, budgets and recovery: COMPLETE**
+  - independent critic gate before autonomous completion
+  - critic can reject unsupported completion and force replanning
+  - separate step and tool-call budgets
+  - bounded replan budget
+  - bounded tool-failure budget
+  - bounded planner/critic protocol-error recovery
+  - repeated-action loop detection and recovery
+  - tool-failure classification for missing paths, permission failures, timeouts and path errors
+  - owner directives feed directly into subsequent autonomous planning
+  - autonomous audit records critic checks, replans, failures, protocol recoveries and loop blocks
+  - Stage 7C behavior remains compatible when no critic is configured
 - **7E — Autonomous research/coding/memory/tool integration: PENDING**
 - **7F — Final tuning and release acceptance: INTENTIONALLY OPEN**
 

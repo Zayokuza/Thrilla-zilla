@@ -243,8 +243,19 @@ class ThrillaApp:
                     route,
                 )
             ),
+            critic=lambda messages, route: (
+                self.runtime_supervisor.chat(
+                    messages,
+                    route,
+                )
+            ),
             workspace=repo_root,
-            max_steps=8,
+            max_steps=12,
+            max_tool_calls=10,
+            max_replans=3,
+            max_tool_failures=3,
+            max_protocol_errors=2,
+            max_repeat_actions=2,
         )
 
     def _coding_agent(self):

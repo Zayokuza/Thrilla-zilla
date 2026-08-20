@@ -143,6 +143,41 @@ class WorkflowServices:
                         0,
                     )
                 ),
+                replans=int(
+                    getattr(
+                        outcome,
+                        "replans",
+                        0,
+                    )
+                ),
+                tool_failures=int(
+                    getattr(
+                        outcome,
+                        "tool_failures",
+                        0,
+                    )
+                ),
+                protocol_errors=int(
+                    getattr(
+                        outcome,
+                        "protocol_errors",
+                        0,
+                    )
+                ),
+                critic_checks=int(
+                    getattr(
+                        outcome,
+                        "critic_checks",
+                        0,
+                    )
+                ),
+                loop_blocks=int(
+                    getattr(
+                        outcome,
+                        "loop_blocks",
+                        0,
+                    )
+                ),
             )
 
             return outcome
