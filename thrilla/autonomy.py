@@ -47,6 +47,23 @@ _ALLOWED_PERMISSIONS = {
     ToolPermission.DEVICE,
 }
 
+_CONTROLLED_INTEGRATED_TOOLS = {
+    "research.query",
+    "memory.search",
+    "memory.remember",
+    "coding.repair",
+}
+
+
+def _autonomous_tool_allowed(
+    name: str,
+    permission: ToolPermission,
+) -> bool:
+    return (
+        permission in _ALLOWED_PERMISSIONS
+        or name in _CONTROLLED_INTEGRATED_TOOLS
+    )
+
 
 @dataclass(frozen=True)
 class AutonomousBudget:
@@ -226,7 +243,10 @@ class AutonomousTaskRunner:
                 item["permission"]
             )
 
-            if permission in _ALLOWED_PERMISSIONS:
+            if _autonomous_tool_allowed(
+                item["name"],
+                permission,
+            ):
                 allowed.append(
                     dict(item)
                 )
@@ -402,9 +422,9 @@ class AutonomousTaskRunner:
             .get(tool)
         )
 
-        if (
-            spec.permission
-            not in _ALLOWED_PERMISSIONS
+        if not _autonomous_tool_allowed(
+            tool,
+            spec.permission,
         ):
             raise AutonomousProtocolError(
                 "planner selected disallowed permission: {0}".format(

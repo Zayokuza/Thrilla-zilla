@@ -45,7 +45,18 @@ release-candidate tuning and acceptance.
   - owner directives feed directly into subsequent autonomous planning
   - autonomous audit records critic checks, replans, failures, protocol recoveries and loop blocks
   - Stage 7C behavior remains compatible when no critic is configured
-- **7E — Autonomous research/coding/memory/tool integration: PENDING**
+- **7E — Autonomous research/coding/memory/tool integration: COMPLETE**
+  - policy-controlled `research.query` autonomous capability
+  - durable `memory.search` and secret-filtered `memory.remember`
+  - checkpointed and rollback-protected `coding.repair`
+  - integrated capabilities share the structured ToolResult/evidence contract
+  - autonomous planner can chain research, memory, repository inspection, tests, and coding repair
+  - arbitrary WRITE and NETWORK tools remain excluded
+  - controlled Stage 7E WRITE/NETWORK capabilities are explicitly allowlisted
+  - coding writes continue through checkpoint + verification + critic + rollback
+  - research remains subject to Thrilla network policy
+  - 7A through 7E feature development is complete
+
 - **7F — Final tuning and release acceptance: INTENTIONALLY OPEN**
 
 ## v1.0.0 boundary

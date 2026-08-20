@@ -72,6 +72,7 @@ from .terminal import (
     terminal_width,
 )
 from .tools import build_default_tool_executor
+from .integration import register_stage7e_tools
 
 
 MAIN_MENU = (
@@ -358,6 +359,19 @@ class ThrillaApp:
             cache=cache,
             max_workers=int(resolved("network.research_workers", 3)),
         )
+
+        if "research.query" not in self.tool_executor.registry.names:
+            register_stage7e_tools(
+                self.tool_executor.registry,
+                research_engine=self.research_engine,
+                memory=self.memory,
+                coding_agent=self.coding_agent,
+            )
+
+        # Rebuild the runner after the integrated capability surface
+        # exists so its deterministic catalog includes Stage 7E tools.
+        self.autonomous_runner = self._autonomous_runner()
+
         self.workflows = WorkflowServices(
             jobs=self.job_manager,
             answer_fn=self._resolve_ask_answer,

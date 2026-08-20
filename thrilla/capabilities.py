@@ -3,13 +3,15 @@
 from .identity import CREATOR_NAME
 
 
-STAGE = 5
+STAGE = 7
 
 ACTIVE_CAPABILITIES = (
     "supervised local llama-server runtime with one managed recovery attempt",
     "100 routed experts with Reason / Action / Critic advisory roles",
-    "structured bounded local read tools",
+    "structured bounded local read, inspection, Git, and test tools",
     "checkpointed repository self-repair with verification and rollback",
+    "bounded multi-step autonomous task execution with critic, replanning, loop detection, and recovery budgets",
+    "controlled autonomous chaining across research, durable memory, structured tools, and checkpointed coding",
     "durable hybrid owner/project memory with provenance and correction",
     "direct local owner-memory and self-knowledge answers without model inference",
     "persistent bounded background jobs with checkpoint recovery",
@@ -19,7 +21,7 @@ ACTIVE_CAPABILITIES = (
 )
 
 FUTURE_CAPABILITIES = (
-    "release-candidate acceptance across target platforms",
+    "Stage 7F final tuning, target-platform acceptance, release documentation, and owner-approved tweaks",
 )
 
 RELEASE_POLICY = (
@@ -34,7 +36,7 @@ def self_description(owner_name: str = "") -> str:
         "Name: Thrilla-zilla",
         "Creator: {0}".format(CREATOR_NAME),
         "Owner: {0}".format(owner),
-        "Roadmap stage: {0}/6".format(STAGE),
+        "Roadmap stage: {0} (7F final acceptance open)".format(STAGE),
         "Active capabilities:",
         *(
             "- " + capability
