@@ -65,6 +65,21 @@ class ToolRegistry:
     def names(self) -> Tuple[str, ...]:
         return tuple(sorted(self._specs))
 
+    @property
+    def catalog(self) -> Tuple[Dict[str, str], ...]:
+        """Return deterministic model-safe tool metadata."""
+        return tuple(
+            {
+                "name": spec.name,
+                "permission": spec.permission.value,
+                "description": spec.description,
+            }
+            for spec in (
+                self._specs[name]
+                for name in sorted(self._specs)
+            )
+        )
+
 
 class ToolExecutor:
     def __init__(self, registry: ToolRegistry) -> None:
@@ -350,4 +365,15 @@ def build_default_tool_executor(
             factory.run_process,
         )
     )
+
+    # Imported lazily to avoid a module-import cycle while keeping
+    # Stage-7 tool implementations isolated from the core contracts.
+    from .toolkit import register_stage7_tools
+
+    register_stage7_tools(
+        registry,
+        factory,
+        repo_root,
+    )
+
     return ToolExecutor(registry)

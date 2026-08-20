@@ -13,7 +13,14 @@ release-candidate tuning and acceptance.
   - runtime-manager replacement invalidates cached binding
   - shutdown clears cached binding
 
-- **7B — Expanded structured tools: PENDING**
+- **7B — Expanded structured tools: COMPLETE**
+  - deterministic tool discovery/catalog
+  - filesystem stat, glob and SHA-256 tools
+  - dedicated read-only Git status and diff
+  - executable PATH discovery
+  - bounded repository unittest execution
+  - all filesystem operations remain root-confined
+  - generic structured tools still expose no unrestricted write primitive
 - **7C — General autonomous task runner: PENDING**
 - **7D — Critic, replanning, budgets and recovery: PENDING**
 - **7E — Autonomous research/coding/memory/tool integration: PENDING**

@@ -22,10 +22,17 @@ class StructuredToolExecutorTests(unittest.TestCase):
         self.assertEqual(
             executor.registry.names,
             (
+                "file.glob",
+                "file.hash",
                 "file.list",
                 "file.read_text",
                 "file.search_text",
+                "file.stat",
+                "git.diff",
+                "git.status",
                 "process.run",
+                "process.which",
+                "python.unittest",
                 "system.info",
             ),
         )
