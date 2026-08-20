@@ -10,6 +10,10 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from . import __version__
 from .audit import AuditLog
+from .autonomy import (
+    AutonomousError,
+    AutonomousTaskRunner,
+)
 from .brain import AgentBrain, BrainError
 from .answers import (
     KnowledgeGap,
@@ -139,6 +143,7 @@ class ThrillaApp:
         self.brain = AgentBrain(max_attempts=2)
         self.expert_orchestrator = ExpertOrchestrator()
         self.tool_executor = self._tool_executor()
+        self.autonomous_runner = self._autonomous_runner()
         self.coding_agent = self._coding_agent()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
@@ -222,6 +227,26 @@ class ThrillaApp:
             donor_root=self.config.donor_path,
         )
 
+    def _autonomous_runner(self):
+        repo_root = (
+            Path(__file__)
+            .resolve()
+            .parent
+            .parent
+        )
+
+        return AutonomousTaskRunner(
+            tool_executor=self.tool_executor,
+            planner=lambda messages, route: (
+                self.runtime_supervisor.chat(
+                    messages,
+                    route,
+                )
+            ),
+            workspace=repo_root,
+            max_steps=8,
+        )
+
     def _coding_agent(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -269,6 +294,7 @@ class ThrillaApp:
         )
         self.expert_orchestrator = ExpertOrchestrator()
         self.tool_executor = self._tool_executor()
+        self.autonomous_runner = self._autonomous_runner()
         self.coding_agent = self._coding_agent()
         self.provider_registry = self._provider_registry()
         self.model = self._model_client()
@@ -326,6 +352,7 @@ class ThrillaApp:
             answer_fn=self._resolve_ask_answer,
             research_engine=self.research_engine,
             coding_agent=self.coding_agent,
+            autonomous_runner=self.autonomous_runner,
             audit_sink=lambda event, **fields: self.audit.write(
                 event,
                 **fields,
@@ -432,6 +459,12 @@ class ThrillaApp:
         if snapshot.state is JobState.COMPLETED:
             if snapshot.kind == "research":
                 return self._format_research_result(snapshot.result)
+            if snapshot.kind == "autonomous":
+                return getattr(
+                    snapshot.result,
+                    "answer",
+                    str(snapshot.result),
+                )
             if snapshot.kind == "repair":
                 return getattr(
                     snapshot.result, "summary", str(snapshot.result)
@@ -698,7 +731,11 @@ class ThrillaApp:
                 continue
 
             if (
-                snapshot.kind in {"answer", "repair"}
+                snapshot.kind in {
+                    "answer",
+                    "repair",
+                    "autonomous",
+                }
                 and snapshot.state
                 not in {
                     JobState.COMPLETED,
@@ -1034,7 +1071,7 @@ class ThrillaApp:
             if command == "/help":
                 print(
                     self.palette.accent(
-                        "/research <query>  /jobs  /work  /route  /model  "
+                        "/research <query>  /auto <goal>  /jobs  /work  /route  /model  "
                         "/remember <fact>  /memories  /forget <query>  "
                         "/correct <query> => <value>  /repair <goal>  "
                         "/clear  /back"
@@ -1088,6 +1125,41 @@ class ThrillaApp:
                     )
                 )
                 self.audit.write("history_cleared", existed=cleared)
+                continue
+
+            if command == "/auto":
+                print(
+                    self.palette.accent(
+                        "Usage: /auto <goal>"
+                    )
+                )
+                continue
+
+            if command.startswith("/auto "):
+                goal = prompt[
+                    len("/auto "):
+                ].strip()
+
+                if not goal:
+                    print(
+                        self.palette.warning(
+                            "Autonomous goal is empty."
+                        )
+                    )
+                    continue
+
+                job_id = (
+                    self.workflows
+                    .run_autonomous_job(
+                        goal
+                    )
+                )
+
+                self._background_job_started(
+                    job_id,
+                    "Autonomous task",
+                )
+
                 continue
 
             if command == "/research":

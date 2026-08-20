@@ -18,6 +18,7 @@ class WorkflowServices:
     research_engine: ResearchEngine
     coding_agent: object
     audit_sink: Optional[Callable] = None
+    autonomous_runner: object = None
 
     def _audit(self, event: str, **fields) -> None:
         if self.audit_sink is None:
@@ -83,6 +84,80 @@ class WorkflowServices:
 
         job_id = self.jobs.submit("research", query, task)
         self._audit("research_job_created", job_id=job_id)
+        return job_id
+
+    def run_autonomous_job(self, goal: str) -> str:
+        if self.autonomous_runner is None:
+            raise WorkflowError(
+                "autonomous runner is not configured"
+            )
+
+        def task(ctx: JobContext):
+            ctx.checkpoint(
+                "autonomy.start",
+                next_action="autonomy.plan.1",
+                completed_steps=0,
+                evidence_count=0,
+            )
+
+            outcome = self.autonomous_runner.run(
+                goal,
+                job_context=ctx,
+            )
+
+            if not getattr(
+                outcome,
+                "completed",
+                False,
+            ):
+                raise WorkflowError(
+                    "autonomous workflow did not complete"
+                )
+
+            answer = str(
+                getattr(
+                    outcome,
+                    "answer",
+                    "",
+                )
+            ).strip()
+
+            if not answer:
+                raise WorkflowError(
+                    "autonomous workflow returned no answer"
+                )
+
+            self._audit(
+                "autonomous_job_completed",
+                tool_calls=int(
+                    getattr(
+                        outcome,
+                        "tool_calls",
+                        0,
+                    )
+                ),
+                evidence_count=int(
+                    getattr(
+                        outcome,
+                        "evidence_count",
+                        0,
+                    )
+                ),
+            )
+
+            return outcome
+
+        job_id = self.jobs.submit(
+            "autonomous",
+            goal,
+            task,
+        )
+
+        self._audit(
+            "autonomous_job_created",
+            job_id=job_id,
+        )
+
         return job_id
 
     def run_repair_job(self, goal: str) -> str:

@@ -21,7 +21,18 @@ release-candidate tuning and acceptance.
   - bounded repository unittest execution
   - all filesystem operations remain root-confined
   - generic structured tools still expose no unrestricted write primitive
-- **7C — General autonomous task runner: PENDING**
+- **7C — General autonomous task runner: COMPLETE**
+  - model-planned multi-step structured-tool execution
+  - explicit tool/finish JSON protocol
+  - deterministic tool catalog exposed to planner
+  - relative workspace path resolution
+  - structured observation feedback after every action
+  - failed tool observations return to the planner instead of becoming fake success
+  - hard autonomous step ceiling
+  - WRITE and NETWORK permissions excluded from the generic runner
+  - autonomous tasks run through persistent background jobs
+  - `/auto <goal>` command surface
+  - active autonomous model work participates in Thrilla's model-contention guard
 - **7D — Critic, replanning, budgets and recovery: PENDING**
 - **7E — Autonomous research/coding/memory/tool integration: PENDING**
 - **7F — Final tuning and release acceptance: INTENTIONALLY OPEN**
