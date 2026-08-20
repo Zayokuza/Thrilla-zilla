@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 from .checkpoints import CheckpointManager
+from .performance import RepositoryIndex
 
 
 class CodingPlanError(RuntimeError):
@@ -61,6 +62,11 @@ class RepositoryInspector:
 
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
+        self.index = RepositoryIndex(
+            self.repo_root,
+            search_roots=self.SEARCH_ROOTS,
+            supported_suffixes=self.SUPPORTED_SUFFIXES,
+        )
 
     @staticmethod
     def _tokens(goal: str) -> Tuple[str, ...]:
@@ -77,46 +83,29 @@ class RepositoryInspector:
     def find_candidates(self, goal: str, max_files: int = 3) -> Tuple[str, ...]:
         limit = max(1, min(int(max_files), 10))
         tokens = self._tokens(goal)
-        ranked = []
 
-        for root_name in self.SEARCH_ROOTS:
-            root = self.repo_root / root_name
-            if not root.exists():
-                continue
-            files = (root,) if root.is_file() else (
-                path for path in root.rglob("*") if path.is_file()
-            )
-            for path in files:
-                if path.suffix.lower() not in self.SUPPORTED_SUFFIXES:
-                    continue
-                try:
-                    if path.stat().st_size > 250_000:
-                        continue
-                    content = path.read_text(
-                        encoding="utf-8", errors="replace"
-                    )[:30_000].lower()
-                except OSError:
-                    continue
-                relative = str(path.relative_to(self.repo_root))
-                haystack = relative.lower() + "\n" + content
-                score = sum(haystack.count(token) for token in tokens)
-                if relative == "thrilla/app.py":
-                    score += 1
-                if score > 0:
-                    ranked.append((score, -len(relative), relative))
+        candidates = self.index.rank(
+            tokens,
+            max_files=limit,
+        )
 
-        ranked.sort(reverse=True)
-        candidates = [item[2] for item in ranked[:limit]]
         if candidates:
-            return tuple(candidates)
+            return candidates
 
         defaults = (
-            "thrilla/app.py", "thrilla/brain.py", "thrilla/tools.py",
-            "thrilla/experts.py", "tests/test_universal_ask.py",
+            "thrilla/app.py",
+            "thrilla/brain.py",
+            "thrilla/tools.py",
+            "thrilla/experts.py",
+            "tests/test_universal_ask.py",
         )
+
         return tuple(
-            value for value in defaults if (self.repo_root / value).is_file()
+            value
+            for value in defaults
+            if (self.repo_root / value).is_file()
         )[:limit]
+
 
 
 class RepositoryCodingWorkflow:

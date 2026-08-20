@@ -25,6 +25,27 @@ class RuntimeSupervisor:
         self.config = config
         self.manager = manager
         self._handle: Optional[ManagedProcessHandle] = None
+        self._binding: Optional[RuntimeClientBinding] = None
+        self._binding_key = None
+
+    def _current_binding_key(self):
+        return (
+            id(self.manager),
+            str(self.config.model_url),
+            str(self.config.model_name),
+        )
+
+    def _remember_binding(
+        self,
+        binding: RuntimeClientBinding,
+    ) -> RuntimeClientBinding:
+        self._binding = binding
+        self._binding_key = self._current_binding_key()
+        return binding
+
+    def _clear_binding(self) -> None:
+        self._binding = None
+        self._binding_key = None
 
     @property
     def managed_handle(self) -> Optional[ManagedProcessHandle]:
@@ -75,11 +96,22 @@ class RuntimeSupervisor:
 
     def ensure_ready(self) -> RuntimeClientBinding:
         """Return a verified binding, autostarting a local runtime if needed."""
+        key = self._current_binding_key()
+
+        if (
+            self._binding is not None
+            and self._binding_key == key
+        ):
+            return self._binding
+
+        self._clear_binding()
+
         try:
-            return self.manager.ready_binding(
+            binding = self.manager.ready_binding(
                 self.config.model_url,
                 self.config.model_name,
             )
+            return self._remember_binding(binding)
         except RuntimeBindingError as initial_error:
             if not self.config.runtime_autostart:
                 raise
@@ -128,10 +160,13 @@ class RuntimeSupervisor:
                     self.config.model_name,
                 )
                 if snapshot.ready:
-                    return self.manager.bind_managed(
+                    binding = self.manager.bind_managed(
                         self._handle.record,
                         host,
                         self.config.model_name,
+                    )
+                    return self._remember_binding(
+                        binding
                     )
                 time.sleep(0.25)
 
@@ -150,14 +185,25 @@ class RuntimeSupervisor:
         try:
             return binding.client.chat(messages, route)
         except ModelError:
-            if self._handle is None or self._handle.process.poll() is None:
+            self._clear_binding()
+
+            if (
+                self._handle is None
+                or self._handle.process.poll() is None
+            ):
                 raise
+
             self._handle = None
             recovered = self.ensure_ready()
-            return recovered.client.chat(messages, route)
+            return recovered.client.chat(
+                messages,
+                route,
+            )
 
     def shutdown(self) -> Optional[ShutdownResult]:
         """Stop only the runtime process owned by this supervisor."""
+        self._clear_binding()
+
         if self._handle is None:
             return None
         handle = self._handle
