@@ -1,6 +1,7 @@
 """Stage-5 read-only research, cache, evidence, and safe-download policy."""
 import hashlib, html, json, threading, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
 from enum import Enum
 from html.parser import HTMLParser
@@ -22,7 +23,7 @@ class SearchHit: url:str; title:str=''; snippet:str=''
 @dataclass(frozen=True)
 class FetchedDocument: url:str; status:int; content_type:str; text:str
 @dataclass(frozen=True)
-class ResearchEvidence: url:str; title:str; text:str; digest:str
+class ResearchEvidence: url:str; title:str; text:str; digest:str; retrieved_at:str=''
 @dataclass(frozen=True)
 class ResearchResult: query:str; evidence:Tuple[ResearchEvidence,...]; errors:Tuple[str,...]; cache_hits:int=0
 
@@ -144,7 +145,16 @@ class ResearchEngine:
                 if not text: continue
                 digest=hashlib.sha256(text.encode()).hexdigest()
                 if digest in digests: continue
-                digests.add(digest); evidence.append(ResearchEvidence(normalize_url(doc.url),resolved.title,text[:4000],digest))
+                digests.add(digest)
+                evidence.append(
+                    ResearchEvidence(
+                        normalize_url(doc.url),
+                        resolved.title,
+                        text[:4000],
+                        digest,
+                        datetime.now(timezone.utc).isoformat(),
+                    )
+                )
                 if len(evidence)>=target:
                     for p in futures:
                         if not p.done(): p.cancel()

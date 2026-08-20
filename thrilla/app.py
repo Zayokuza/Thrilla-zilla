@@ -415,6 +415,11 @@ class ThrillaApp:
                 "{0}. {1}".format(index, item.title or item.url)
             )
             lines.append("   " + item.url)
+            retrieved_at = getattr(item, "retrieved_at", "")
+            if retrieved_at:
+                lines.append(
+                    "   Retrieved: " + str(retrieved_at)
+                )
             lines.append(
                 "   " + " ".join(item.text.split())[:360]
             )
